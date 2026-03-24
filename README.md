@@ -40,7 +40,7 @@ Use `repo_link` to record how projects relate — e.g. "core-lib provides shared
 
 ### Eviction
 
-Memories are automatically evicted when the count exceeds `maxMemories` (default 500). Least-recently-accessed memories are removed first. Configure via environment variables:
+Memories are automatically evicted when the count exceeds `maxMemories` (default 500). Least-recently-accessed memories are removed first. **Pinned memories are never evicted** — use `pinned: true` on `memory_store` for permanent facts and user preferences. Configure via environment variables:
 
 - `MEMORY_MAX_COUNT` — max stored memories (default 500)
 - `MEMORY_MAX_AGE_DAYS` — max age in days (default 90)
