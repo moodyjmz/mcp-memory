@@ -46,20 +46,26 @@ When storing a memory with a `file_path`, the project is auto-detected from the 
 
 ```bash
 npm install
-npm run build
+npm run setup
 ```
 
-### Register with Claude Code
+This builds the TypeScript, registers the MCP server globally with Claude Code, and adds memory usage instructions to `~/.claude/CLAUDE.md` so Claude proactively stores and recalls knowledge across sessions.
+
+Verify with `claude mcp list` or `/mcp` inside a session.
+
+### Manual registration
+
+If you prefer to register manually instead of using the setup script:
 
 ```bash
+npm run build
+
 # Global (all projects)
 claude mcp add memory -s user $(which node) /path/to/claude-memory/dist/server.js
 
 # Single project
 claude mcp add memory $(which node) /path/to/claude-memory/dist/server.js
 ```
-
-Verify with `claude mcp list` or `/mcp` inside a session.
 
 ## Development
 

@@ -9,7 +9,8 @@
     "start": "node dist/server.js",
     "dev": "tsc --watch",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "setup": "./setup.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
