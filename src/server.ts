@@ -83,7 +83,7 @@ server.registerTool('memory_store', {
   inputSchema: {
     text: z.string().describe('The fact to remember'),
     category: z.enum(CATEGORIES).describe('Category: architecture, convention, gotcha, decision, or preference'),
-    file_path: z.string().optional().describe('Related file path (absolute). Enables staleness detection.'),
+    file_path: z.string().optional().describe('Related file path. Converted to relative (portable) on storage. Enables staleness detection.'),
     project: z.string().optional().describe('Project identifier for multi-project filtering'),
   },
 }, async ({ text, category, file_path, project }) => {
