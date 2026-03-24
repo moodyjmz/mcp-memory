@@ -91,3 +91,10 @@ The embedding model (`Xenova/all-MiniLM-L6-v2`) runs locally — no API calls. I
 - `typescript` — type safety
 - `vitest` — test runner
 - `@types/better-sqlite3`, `@types/node` — type definitions
+
+## Gotchas
+
+- **Build before first use** — the server runs from `dist/`, not `src/`. You must run `npm run build` after cloning or the server won't start.
+- **nvm users** — `$(which node)` captures the active nvm node path at registration time. If you switch node versions later, the MCP registration will break. Consider using a `.nvmrc` with `nvm exec` or the full versioned path.
+- **Native module (`better-sqlite3`)** — compiles on `npm install`. If you change CPU architecture (e.g., x86 to ARM Mac) or jump major node versions, run `npm rebuild`.
+- **First run downloads ~30MB** — the embedding model (`Xenova/all-MiniLM-L6-v2`) is fetched and cached locally on first `memory_store` or `memory_query`. Subsequent runs are fast.
