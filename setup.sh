@@ -39,6 +39,8 @@ You have access to persistent memory tools via the `memory` MCP server. Use them
 The tools are: `memory_store`, `memory_query`, `memory_list`, `memory_forget`, `repo_link`, `repo_unlink`, `repo_map`.
 Project is auto-detected from git root when you provide a file path.
 Use `repo_link` when you discover how repos relate (provides, consumes, depends_on, builds_from, extends). Use `repo_map` to check known relationships before making cross-repo assumptions.
+
+Store silently but announce with a brief one-liner, e.g. "Storing: LESS overrides needed for escaped string interpolation". No need to ask permission — just be transparent about what goes in.
 <!-- /claude-memory-mcp -->
 BLOCK
   echo "    Added memory instructions to $CLAUDE_MD"
