@@ -204,6 +204,69 @@ server.registerTool('memory_forget', {
   };
 });
 
+// ─── repo_link ───────────────────────────────────────────────────────────────
+
+server.registerTool('repo_link', {
+  description: 'Record a cross-repo relationship — how one project provides, consumes, or depends on another. E.g. "core-lib provides shared types consumed by frontend".',
+  inputSchema: {
+    source: z.string().describe('Source project name (the provider)'),
+    target: z.string().describe('Target project name (the consumer)'),
+    relationship_type: z.enum(['provides', 'consumes', 'depends_on', 'builds_from', 'extends']).describe('Type of relationship'),
+    description: z.string().describe('What is provided/consumed/shared — be specific'),
+    file_path: z.string().optional().describe('File where the relationship is visible (e.g. the import or config)'),
+  },
+}, async ({ source, target, relationship_type, description, file_path }) => {
+  const db = getDefaultDb();
+  const id = db.addRelationship(source, target, relationship_type, description, file_path);
+
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({ linked: true, id, source, target, relationship_type, description }, null, 2),
+    }],
+  };
+});
+
+// ─── repo_unlink ─────────────────────────────────────────────────────────────
+
+server.registerTool('repo_unlink', {
+  description: 'Remove a cross-repo relationship by ID.',
+  inputSchema: {
+    id: z.number().describe('The relationship ID to remove'),
+  },
+}, async ({ id }) => {
+  const db = getDefaultDb();
+  db.removeRelationship(id);
+
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({ unlinked: true, id }, null, 2),
+    }],
+  };
+});
+
+// ─── repo_map ────────────────────────────────────────────────────────────────
+
+server.registerTool('repo_map', {
+  description: 'Show all known cross-repo relationships, optionally filtered by project. Returns how repos connect: what provides what, what depends on what.',
+  inputSchema: {
+    project: z.string().optional().describe('Filter to relationships involving this project'),
+  },
+}, async ({ project }) => {
+  const db = getDefaultDb();
+  const relationships = db.getRepoMap(project);
+
+  return {
+    content: [{
+      type: 'text' as const,
+      text: relationships.length === 0
+        ? JSON.stringify({ relationships: [], message: 'No cross-repo relationships stored yet' }, null, 2)
+        : JSON.stringify(relationships, null, 2),
+    }],
+  };
+});
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
