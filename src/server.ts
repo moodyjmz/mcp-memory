@@ -85,8 +85,9 @@ server.registerTool('memory_store', {
     category: z.enum(CATEGORIES).describe('Category: architecture, convention, gotcha, decision, or preference'),
     file_path: z.string().optional().describe('Related file path. Converted to relative (portable) on storage. Enables staleness detection.'),
     project: z.string().optional().describe('Project identifier for multi-project filtering'),
+    pinned: z.boolean().optional().describe('Pin this memory so it is never evicted. Use for user-provided preferences and permanent facts.'),
   },
-}, async ({ text, category, file_path, project }) => {
+}, async ({ text, category, file_path, project, pinned }) => {
   const db = getDefaultDb();
   const index = getDefaultIndex();
 
@@ -116,7 +117,7 @@ server.registerTool('memory_store', {
     };
   }
 
-  db.insertMemory(result.id, text, category as MemoryCategory, storedPath, git_sha, resolvedProject);
+  db.insertMemory(result.id, text, category as MemoryCategory, storedPath, git_sha, resolvedProject, pinned);
 
   // Evict old memories if over limit
   const evicted = await evictIfNeeded();
@@ -130,6 +131,7 @@ server.registerTool('memory_store', {
         category,
         file_path: storedPath || null,
         project: resolvedProject || null,
+        pinned: pinned || false,
         ...(evicted > 0 ? { evicted } : {}),
       }, null, 2),
     }],

@@ -113,6 +113,39 @@ describe('db', () => {
     expect(row!.git_sha).toBeNull();
     expect(row!.project).toBeNull();
   });
+
+  it('stores a pinned memory', () => {
+    db.insertMemory('m1', 'user preference', 'preference', null, null, null, true);
+    const row = db.getMemory('m1');
+    expect(row!.pinned).toBe(1);
+  });
+
+  it('defaults to unpinned', () => {
+    db.insertMemory('m1', 'normal fact', 'gotcha');
+    const row = db.getMemory('m1');
+    expect(row!.pinned).toBe(0);
+  });
+
+  it('pins and unpins a memory', () => {
+    db.insertMemory('m1', 'fact', 'gotcha');
+    expect(db.getMemory('m1')!.pinned).toBe(0);
+
+    db.pinMemory('m1');
+    expect(db.getMemory('m1')!.pinned).toBe(1);
+
+    db.unpinMemory('m1');
+    expect(db.getMemory('m1')!.pinned).toBe(0);
+  });
+
+  it('excludes pinned memories from eviction', () => {
+    db.insertMemory('pinned1', 'permanent fact', 'preference', null, null, null, true);
+    db.insertMemory('normal1', 'temporary fact', 'gotcha');
+    db.insertMemory('normal2', 'another temp', 'gotcha');
+
+    const ids = db.getEvictableIds({ maxMemories: 1, maxAgeDays: 90 });
+    expect(ids).not.toContain('pinned1');
+    expect(ids).toHaveLength(2); // both unpinned are candidates
+  });
 });
 
 describe('repo relationships', () => {
