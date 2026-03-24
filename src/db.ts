@@ -7,6 +7,16 @@ import type { MemoryRow, MemoryCategory, EvictionConfig } from './types.js';
 
 const DEFAULT_DATA_DIR = path.join(os.homedir(), '.claude-memory');
 
+export interface RepoRelationship {
+  id: number;
+  source_project: string;
+  target_project: string;
+  relationship_type: string;
+  description: string;
+  file_path: string | null;
+  created_at: string;
+}
+
 export interface MemoryDb {
   insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null): void;
   deleteMemory(id: string): void;
@@ -15,6 +25,9 @@ export interface MemoryDb {
   updateLastAccessed(ids: string[]): void;
   countMemories(): number;
   getEvictableIds(config: EvictionConfig): string[];
+  addRelationship(source: string, target: string, type: string, description: string, file_path?: string | null): number;
+  removeRelationship(id: number): void;
+  getRepoMap(project?: string): RepoRelationship[];
   close(): void;
 }
 
@@ -39,6 +52,18 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
     CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project);
     CREATE INDEX IF NOT EXISTS idx_memories_file_path ON memories(file_path);
+
+    CREATE TABLE IF NOT EXISTS repo_relationships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_project TEXT NOT NULL,
+      target_project TEXT NOT NULL,
+      relationship_type TEXT NOT NULL,
+      description TEXT NOT NULL,
+      file_path TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rel_source ON repo_relationships(source_project);
+    CREATE INDEX IF NOT EXISTS idx_rel_target ON repo_relationships(target_project);
   `);
 
   // Migrate: add last_accessed column if missing (existing DBs)
@@ -106,6 +131,27 @@ export function createMemoryDb(dbPath: string): MemoryDb {
         ORDER BY COALESCE(last_accessed, created_at) ASC
         LIMIT ?
       `).all(excess) as { id: string }[]).map(r => r.id);
+    },
+
+    addRelationship(source, target, type, description, file_path) {
+      const result = db.prepare(`
+        INSERT INTO repo_relationships (source_project, target_project, relationship_type, description, file_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(source, target, type, description, file_path ?? null, new Date().toISOString());
+      return Number(result.lastInsertRowid);
+    },
+
+    removeRelationship(id) {
+      db.prepare('DELETE FROM repo_relationships WHERE id = ?').run(id);
+    },
+
+    getRepoMap(project?) {
+      if (project) {
+        return db.prepare(
+          'SELECT * FROM repo_relationships WHERE source_project = ? OR target_project = ? ORDER BY created_at DESC'
+        ).all(project, project) as RepoRelationship[];
+      }
+      return db.prepare('SELECT * FROM repo_relationships ORDER BY created_at DESC').all() as RepoRelationship[];
     },
 
     close() {

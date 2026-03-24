@@ -114,3 +114,56 @@ describe('db', () => {
     expect(row!.project).toBeNull();
   });
 });
+
+describe('repo relationships', () => {
+  let db: MemoryDb;
+  let dir: string;
+
+  beforeEach(() => {
+    ({ db, dir } = createTestDb());
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('adds and retrieves a relationship', () => {
+    const id = db.addRelationship('core-lib', 'frontend', 'provides', 'shared config constants', '/core-lib/src/config.ts');
+    const map = db.getRepoMap();
+
+    expect(map).toHaveLength(1);
+    expect(map[0].id).toBe(id);
+    expect(map[0].source_project).toBe('core-lib');
+    expect(map[0].target_project).toBe('frontend');
+    expect(map[0].relationship_type).toBe('provides');
+    expect(map[0].description).toBe('shared config constants');
+    expect(map[0].file_path).toBe('/core-lib/src/config.ts');
+  });
+
+  it('filters by project', () => {
+    db.addRelationship('core-lib', 'frontend', 'provides', 'shared types');
+    db.addRelationship('api-server', 'frontend', 'provides', 'REST endpoints');
+    db.addRelationship('core-lib', 'mobile-app', 'provides', 'utility functions');
+
+    const frontend = db.getRepoMap('frontend');
+    expect(frontend).toHaveLength(2);
+
+    const coreLib = db.getRepoMap('core-lib');
+    expect(coreLib).toHaveLength(2);
+
+    const mobile = db.getRepoMap('mobile-app');
+    expect(mobile).toHaveLength(1);
+  });
+
+  it('removes a relationship', () => {
+    const id = db.addRelationship('repo-a', 'repo-b', 'depends_on', 'build output');
+    db.removeRelationship(id);
+    expect(db.getRepoMap()).toHaveLength(0);
+  });
+
+  it('returns empty array when no relationships', () => {
+    expect(db.getRepoMap()).toHaveLength(0);
+    expect(db.getRepoMap('nonexistent')).toHaveLength(0);
+  });
+});

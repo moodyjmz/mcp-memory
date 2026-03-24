@@ -26,10 +26,17 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 | `memory_query` | Semantic search. Returns top-K results with staleness flags. Optional project filter. Tracks access for eviction. |
 | `memory_list` | List memories filtered by category and/or project. |
 | `memory_forget` | Remove a memory by ID from both stores. |
+| `repo_link` | Record a cross-repo relationship (provides, consumes, depends_on, builds_from, extends). |
+| `repo_unlink` | Remove a cross-repo relationship by ID. |
+| `repo_map` | Show all known cross-repo relationships, optionally filtered by project. |
 
 ### Categories
 
-`architecture` · `convention` · `gotcha` · `decision` · `preference`
+`architecture` · `convention` · `gotcha` · `decision` · `preference` · `relationship`
+
+### Cross-Repo Knowledge
+
+Use `repo_link` to record how projects relate — e.g. "core-lib provides shared types consumed by frontend". These relationships are stored in a dedicated table (not the vector index) for fast structured queries. Use `repo_map` to see all connections for a project.
 
 ### Eviction
 

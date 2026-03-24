@@ -1,4 +1,4 @@
-export const CATEGORIES = ['architecture', 'convention', 'gotcha', 'decision', 'preference'] as const;
+export const CATEGORIES = ['architecture', 'convention', 'gotcha', 'decision', 'preference', 'relationship'] as const;
 
 export type MemoryCategory = typeof CATEGORIES[number];
 
