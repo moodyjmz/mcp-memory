@@ -1,0 +1,17 @@
+{
+  "name": "claude-memory-mcp",
+  "version": "1.0.0",
+  "description": "MCP memory server for Claude Code — persistent, searchable codebase knowledge",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@huggingface/transformers": "^3.8.1",
+    "better-sqlite3": "^12.8.0",
+    "onnxruntime-node": "^1.21.0",
+    "vectra": "^0.12.3"
+  }
+}
