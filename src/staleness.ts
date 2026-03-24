@@ -9,9 +9,14 @@ export function checkStaleness(file_path: string | null | undefined, git_sha: st
   }
 
   try {
-    const absPath = path.isAbsolute(file_path) ? file_path : path.resolve(file_path);
+    // Relative paths are resolved against cwd (the project the session is in)
+    const absPath = path.isAbsolute(file_path) ? file_path : path.resolve(process.cwd(), file_path);
 
     if (!fs.existsSync(absPath)) {
+      // Relative path that doesn't resolve here — not necessarily deleted, just different repo
+      if (!path.isAbsolute(file_path)) {
+        return { stale: false };
+      }
       return { stale: true, reason: 'file deleted' };
     }
 

@@ -20,15 +20,42 @@ function getGitSha(file_path: string): string | null {
   }
 }
 
-function getGitRoot(file_path: string): string | null {
+function getGitRootPath(file_path: string): string | null {
   try {
     const absPath = path.isAbsolute(file_path) ? file_path : path.resolve(file_path);
     const cwd = path.dirname(absPath);
-    const root = execSync('git rev-parse --show-toplevel', { cwd, encoding: 'utf8', timeout: 5000 }).trim();
-    return path.basename(root);
+    return execSync('git rev-parse --show-toplevel', { cwd, encoding: 'utf8', timeout: 5000 }).trim();
   } catch {
     return null;
   }
+}
+
+function getGitRemote(file_path: string): string | null {
+  try {
+    const absPath = path.isAbsolute(file_path) ? file_path : path.resolve(file_path);
+    const cwd = path.dirname(absPath);
+    const url = execSync('git remote get-url origin', { cwd, encoding: 'utf8', timeout: 5000 }).trim();
+    // Normalise: strip .git suffix, convert SSH to a consistent format
+    return url.replace(/\.git$/, '').replace(/^git@([^:]+):/, 'https://$1/');
+  } catch {
+    return null;
+  }
+}
+
+function toRelativePath(file_path: string): string {
+  const root = getGitRootPath(file_path);
+  if (!root) return file_path;
+  const absPath = path.isAbsolute(file_path) ? file_path : path.resolve(file_path);
+  const rel = path.relative(root, absPath);
+  return rel || file_path;
+}
+
+function getProjectId(file_path: string): string | null {
+  // Prefer git remote URL (portable), fall back to repo dir name
+  return getGitRemote(file_path) || (() => {
+    const root = getGitRootPath(file_path);
+    return root ? path.basename(root) : null;
+  })();
 }
 
 async function evictIfNeeded(): Promise<number> {
@@ -63,13 +90,15 @@ server.registerTool('memory_store', {
   const db = getDefaultDb();
   const index = getDefaultIndex();
 
-  // Auto-detect project from git root if not provided
-  const resolvedProject = project || (file_path ? getGitRoot(file_path) : null) || undefined;
+  // Auto-detect project from git remote URL if not provided
+  const resolvedProject = project || (file_path ? getProjectId(file_path) : null) || undefined;
   const git_sha = file_path ? getGitSha(file_path) : null;
+  // Store relative path (portable across machines)
+  const storedPath = file_path ? toRelativePath(file_path) : undefined;
 
   const result = await index.addFact(text, {
     category: category as MemoryCategory,
-    file_path,
+    file_path: storedPath,
     project: resolvedProject,
   });
 
@@ -87,7 +116,7 @@ server.registerTool('memory_store', {
     };
   }
 
-  db.insertMemory(result.id, text, category as MemoryCategory, file_path, git_sha, resolvedProject);
+  db.insertMemory(result.id, text, category as MemoryCategory, storedPath, git_sha, resolvedProject);
 
   // Evict old memories if over limit
   const evicted = await evictIfNeeded();
@@ -99,7 +128,7 @@ server.registerTool('memory_store', {
         stored: true,
         id: result.id,
         category,
-        file_path: file_path || null,
+        file_path: storedPath || null,
         project: resolvedProject || null,
         ...(evicted > 0 ? { evicted } : {}),
       }, null, 2),
