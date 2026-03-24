@@ -1,8 +1,9 @@
 import { execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import type { StalenessResult } from './types.js';
 
-export function checkStaleness(file_path, git_sha) {
+export function checkStaleness(file_path: string | null | undefined, git_sha: string | null | undefined): StalenessResult {
   if (!file_path || !git_sha) {
     return { stale: false };
   }
