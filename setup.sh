@@ -34,9 +34,11 @@ You have access to persistent memory tools via the `memory` MCP server. Use them
 - **When the user corrects your approach**: store the correction so you don't repeat the mistake
 - **When you discover how systems connect**: store cross-repo relationships and integration points
 - **Before exploring unfamiliar code**: check if you already know something relevant
+- **Before context compaction**: store key learnings from the session — decisions made, gotchas found, conventions discovered — before they're compressed away
 
-The tools are: `memory_store`, `memory_query`, `memory_list`, `memory_forget`.
+The tools are: `memory_store`, `memory_query`, `memory_list`, `memory_forget`, `repo_link`, `repo_unlink`, `repo_map`.
 Project is auto-detected from git root when you provide a file path.
+Use `repo_link` when you discover how repos relate (provides, consumes, depends_on, builds_from, extends). Use `repo_map` to check known relationships before making cross-repo assumptions.
 <!-- /claude-memory-mcp -->
 BLOCK
   echo "    Added memory instructions to $CLAUDE_MD"
