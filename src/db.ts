@@ -18,7 +18,9 @@ export interface RepoRelationship {
 }
 
 export interface MemoryDb {
-  insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null): void;
+  insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned?: boolean): void;
+  pinMemory(id: string): void;
+  unpinMemory(id: string): void;
   deleteMemory(id: string): void;
   getMemory(id: string): MemoryRow | undefined;
   listMemories(category?: MemoryCategory, project?: string): MemoryRow[];
@@ -66,18 +68,29 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     CREATE INDEX IF NOT EXISTS idx_rel_target ON repo_relationships(target_project);
   `);
 
-  // Migrate: add last_accessed column if missing (existing DBs)
+  // Migrations for existing DBs
   const columns = db.prepare("PRAGMA table_info(memories)").all() as { name: string }[];
   if (!columns.some(c => c.name === 'last_accessed')) {
     db.exec('ALTER TABLE memories ADD COLUMN last_accessed TEXT');
   }
+  if (!columns.some(c => c.name === 'pinned')) {
+    db.exec('ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+  }
 
   return {
-    insertMemory(id, text, category, file_path, git_sha, project) {
+    insertMemory(id, text, category, file_path, git_sha, project, pinned = false) {
       db.prepare(`
-        INSERT OR REPLACE INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed)
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-      `).run(id, text, category, file_path ?? null, git_sha ?? null, project ?? null, new Date().toISOString());
+        INSERT OR REPLACE INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
+      `).run(id, text, category, file_path ?? null, git_sha ?? null, project ?? null, new Date().toISOString(), pinned ? 1 : 0);
+    },
+
+    pinMemory(id) {
+      db.prepare('UPDATE memories SET pinned = 1 WHERE id = ?').run(id);
+    },
+
+    unpinMemory(id) {
+      db.prepare('UPDATE memories SET pinned = 0 WHERE id = ?').run(id);
     },
 
     deleteMemory(id) {
@@ -128,6 +141,7 @@ export function createMemoryDb(dbPath: string): MemoryDb {
 
       return (db.prepare(`
         SELECT id FROM memories
+        WHERE pinned = 0
         ORDER BY COALESCE(last_accessed, created_at) ASC
         LIMIT ?
       `).all(excess) as { id: string }[]).map(r => r.id);

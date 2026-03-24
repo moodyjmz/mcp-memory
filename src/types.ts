@@ -21,6 +21,7 @@ export interface MemoryRow {
   project: string | null;
   created_at: string;
   last_accessed: string | null;
+  pinned: number; // 0 or 1 (SQLite boolean)
 }
 
 export interface StalenessResult {
