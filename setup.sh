@@ -48,5 +48,12 @@ BLOCK
   echo "    Added memory instructions to $CLAUDE_MD"
 fi
 
+echo "==> Installing Claude Code hooks..."
+mkdir -p "$HOME/.claude/hooks"
+cp "$SCRIPT_DIR/hooks/"*.sh "$HOME/.claude/hooks/"
+chmod +x "$HOME/.claude/hooks/"*.sh
+echo "    Hooks copied to $HOME/.claude/hooks/"
+echo "    Add hook config to ~/.claude/settings.json — see README for details."
+
 echo ""
 echo "Done. Restart Claude Code to pick up the changes."
