@@ -6,7 +6,7 @@ A local MCP (Model Context Protocol) server that gives Claude Code persistent, s
 
 ```
 src/
-  server.ts          MCP entry point, registers 4 tools via stdio
+  server.ts          MCP entry point, registers tools via stdio
   embeddings.ts      Local embedding model (Xenova/all-MiniLM-L6-v2, 384-dim)
   memory-index.ts    Vectra vector index for semantic search + dedup
   db.ts              SQLite metadata store (category, file path, git SHA, project)
@@ -29,6 +29,7 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 | `repo_link` | Record a cross-repo relationship (provides, consumes, depends_on, builds_from, extends). |
 | `repo_unlink` | Remove a cross-repo relationship by ID. |
 | `repo_map` | Show all known cross-repo relationships, optionally filtered by project. |
+| `memory_project_summary` | Lightweight project overview for session start: category counts, pinned memories, repo relationships, and 5 most recently accessed memories. |
 
 ### Categories
 
@@ -104,6 +105,52 @@ The embedding model (`Xenova/all-MiniLM-L6-v2`) runs locally — no API calls. I
 - `typescript` — type safety
 - `vitest` — test runner
 - `@types/better-sqlite3`, `@types/node` — type definitions
+
+## Claude Code Hooks
+
+Optional hooks to nudge Claude into using memory at the right moments. Add to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/session-start.sh", "timeout": 5 }]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [{ "type": "command", "command": "echo 'Memory: Context is about to be compacted. Store any key learnings to MCP memory NOW before they are lost.'" }]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/session-end.sh", "timeout": 5 }]
+      }
+    ]
+  }
+}
+```
+
+Example hook scripts for `~/.claude/hooks/`:
+
+**session-start.sh** — detects project from git and reminds Claude to load context:
+```bash
+#!/bin/bash
+PROJECT=$(git remote get-url origin 2>/dev/null | sed 's/\.git$//' | sed 's|^git@[^:]*:|https://|')
+[ -z "$PROJECT" ] && PROJECT=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)
+if [ -n "$PROJECT" ]; then
+  echo "Memory: project detected as '$PROJECT'. Use memory_project_summary to load context."
+else
+  echo "Memory: no git project detected. Use memory_query if you need stored context."
+fi
+```
+
+**session-end.sh** — reminds Claude to persist learnings:
+```bash
+#!/bin/bash
+echo "Memory: Before ending, store any key learnings (architectural decisions, conventions, gotchas) using memory_store. Only store things not derivable from code."
+```
 
 ## Gotchas
 
