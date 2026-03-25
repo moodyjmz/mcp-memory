@@ -108,7 +108,12 @@ The embedding model (`Xenova/all-MiniLM-L6-v2`) runs locally — no API calls. I
 
 ## Claude Code Hooks
 
-Optional hooks to nudge Claude into using memory at the right moments. Add to `~/.claude/settings.json`:
+Optional hooks to nudge Claude into using memory at the right moments. Hook scripts are in the `hooks/` directory — copy them to `~/.claude/hooks/` and add the following to `~/.claude/settings.json`:
+
+```bash
+cp hooks/*.sh ~/.claude/hooks/
+chmod +x ~/.claude/hooks/*.sh
+```
 
 ```json
 {
@@ -120,7 +125,7 @@ Optional hooks to nudge Claude into using memory at the right moments. Add to `~
     ],
     "PreCompact": [
       {
-        "hooks": [{ "type": "command", "command": "echo 'Memory: Context is about to be compacted. Store any key learnings to MCP memory NOW before they are lost.'" }]
+        "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/pre-compact.sh", "timeout": 5 }]
       }
     ],
     "SessionEnd": [
@@ -132,25 +137,13 @@ Optional hooks to nudge Claude into using memory at the right moments. Add to `~
 }
 ```
 
-Example hook scripts for `~/.claude/hooks/`:
+| Hook | Event | What it does |
+|------|-------|-------------|
+| `session-start.sh` | SessionStart | Detects project from git, reminds Claude to call `memory_project_summary` |
+| `pre-compact.sh` | PreCompact | Warns Claude to store learnings before context is compressed |
+| `session-end.sh` | SessionEnd | Reminds Claude to persist key findings before session closes |
 
-**session-start.sh** — detects project from git and reminds Claude to load context:
-```bash
-#!/bin/bash
-PROJECT=$(git remote get-url origin 2>/dev/null | sed 's/\.git$//' | sed 's|^git@[^:]*:|https://|')
-[ -z "$PROJECT" ] && PROJECT=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)
-if [ -n "$PROJECT" ]; then
-  echo "Memory: project detected as '$PROJECT'. Use memory_project_summary to load context."
-else
-  echo "Memory: no git project detected. Use memory_query if you need stored context."
-fi
-```
-
-**session-end.sh** — reminds Claude to persist learnings:
-```bash
-#!/bin/bash
-echo "Memory: Before ending, store any key learnings (architectural decisions, conventions, gotchas) using memory_store. Only store things not derivable from code."
-```
+All hooks output colour-coded console messages (cyan/red/yellow) for visibility.
 
 ## Gotchas
 
