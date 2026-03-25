@@ -298,6 +298,68 @@ server.registerTool('repo_map', {
   };
 });
 
+// ─── memory_project_summary ──────────────────────────────────────────────────
+
+server.registerTool('memory_project_summary', {
+  description: 'Lightweight project overview for session start: category counts, pinned memories, repo relationships, and recently accessed memories. Does NOT return all memories.',
+  inputSchema: {
+    project: z.string().optional().describe('Project identifier. Auto-detected from file_path if not given.'),
+    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given.'),
+  },
+}, async ({ project, file_path }) => {
+  const db = getDefaultDb();
+
+  const resolvedProject = project || (file_path ? getProjectId(file_path) : null) || undefined;
+  if (!resolvedProject) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ error: 'Could not determine project. Provide project or file_path.' }, null, 2),
+      }],
+    };
+  }
+
+  const allMemories = db.listMemories(undefined, resolvedProject);
+
+  // Category counts
+  const categoryCounts: Record<string, number> = {};
+  for (const row of allMemories) {
+    categoryCounts[row.category] = (categoryCounts[row.category] || 0) + 1;
+  }
+
+  // Pinned memories (full text)
+  const pinned = allMemories
+    .filter(r => r.pinned === 1)
+    .map(r => ({ id: r.id, text: r.text, category: r.category }));
+
+  // 5 most recently accessed memories
+  const recent = [...allMemories]
+    .sort((a, b) => {
+      const aDate = a.last_accessed || a.created_at;
+      const bDate = b.last_accessed || b.created_at;
+      return bDate.localeCompare(aDate);
+    })
+    .slice(0, 5)
+    .map(r => ({ id: r.id, text: r.text, category: r.category }));
+
+  // Repo relationships
+  const relationships = db.getRepoMap(resolvedProject);
+
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({
+        project: resolvedProject,
+        total_memories: allMemories.length,
+        category_counts: categoryCounts,
+        pinned_memories: pinned,
+        recent_memories: recent,
+        repo_relationships: relationships,
+      }, null, 2),
+    }],
+  };
+});
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
