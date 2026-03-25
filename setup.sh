@@ -27,9 +27,17 @@ else
 <!-- claude-memory-mcp -->
 ## Codebase Memory (MCP)
 
-You have access to persistent memory tools via the `memory` MCP server. Use them proactively:
+You have access to persistent memory tools via the `memory` MCP server.
 
-- **On session start**: query memory for context about the current project before diving into code
+**MANDATORY FIRST ACTION — DO THIS BEFORE ANYTHING ELSE:**
+When a session starts (you will see a SessionStart hook message), you MUST:
+1. Tell the user: "Loading project memory..." (so they can see it happening)
+2. Call `memory_project_summary` with the detected project
+3. Only THEN respond to whatever the user asked
+
+Do NOT skip this. Do NOT respond to the user first. This provides critical project context that prevents wasted investigation time. If the hook detected a project, use that. Otherwise auto-detect from file_path.
+
+Use memory proactively throughout the session:
 - **When you learn something non-obvious**: store architectural decisions, conventions, gotchas, and preferences
 - **When the user corrects your approach**: store the correction so you don't repeat the mistake
 - **When you discover how systems connect**: store cross-repo relationships and integration points
