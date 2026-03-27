@@ -57,7 +57,7 @@ npm install
 npm run setup
 ```
 
-This builds the TypeScript, registers the MCP server globally with Claude Code, and adds memory usage instructions to `~/.claude/CLAUDE.md` so Claude proactively stores and recalls knowledge across sessions.
+This builds the TypeScript, registers the MCP server globally with Claude Code, adds memory usage instructions to `~/.claude/CLAUDE.md`, configures tool permissions for autonomous access, and installs session hooks — so Claude proactively stores and recalls knowledge across sessions.
 
 Verify with `claude mcp list` or `/mcp` inside a session.
 
@@ -108,15 +108,31 @@ The embedding model (`Xenova/all-MiniLM-L6-v2`) runs locally — no API calls. I
 
 ## Claude Code Hooks
 
-Optional hooks to nudge Claude into using memory at the right moments. Hook scripts are in the `hooks/` directory — copy them to `~/.claude/hooks/` and add the following to `~/.claude/settings.json`:
+Optional hooks to nudge Claude into using memory at the right moments. The `npm run setup` script installs these automatically — it copies the hook scripts to `~/.claude/hooks/` and adds the hooks and tool permissions to `~/.claude/settings.json`.
+
+To install manually instead:
 
 ```bash
 cp hooks/*.sh ~/.claude/hooks/
 chmod +x ~/.claude/hooks/*.sh
 ```
 
+Then add the hook config and memory tool permissions to `~/.claude/settings.json`:
+
 ```json
 {
+  "permissions": {
+    "allow": [
+      "mcp__memory__memory_store",
+      "mcp__memory__memory_query",
+      "mcp__memory__memory_list",
+      "mcp__memory__memory_forget",
+      "mcp__memory__memory_project_summary",
+      "mcp__memory__repo_link",
+      "mcp__memory__repo_unlink",
+      "mcp__memory__repo_map"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
