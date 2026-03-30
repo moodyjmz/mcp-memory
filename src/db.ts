@@ -18,7 +18,7 @@ export interface RepoRelationship {
 }
 
 export interface MemoryDb {
-  insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned?: boolean): void;
+  insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned?: boolean, tags?: string | null): void;
   pinMemory(id: string): void;
   unpinMemory(id: string): void;
   deleteMemory(id: string): void;
@@ -76,13 +76,16 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   if (!columns.some(c => c.name === 'pinned')) {
     db.exec('ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
   }
+  if (!columns.some(c => c.name === 'tags')) {
+    db.exec('ALTER TABLE memories ADD COLUMN tags TEXT');
+  }
 
   return {
-    insertMemory(id, text, category, file_path, git_sha, project, pinned = false) {
+    insertMemory(id, text, category, file_path, git_sha, project, pinned = false, tags = null) {
       db.prepare(`
-        INSERT OR REPLACE INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned)
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
-      `).run(id, text, category, file_path ?? null, git_sha ?? null, project ?? null, new Date().toISOString(), pinned ? 1 : 0);
+        INSERT OR REPLACE INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned, tags)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      `).run(id, text, category, file_path ?? null, git_sha ?? null, project ?? null, new Date().toISOString(), pinned ? 1 : 0, tags ?? null);
     },
 
     pinMemory(id) {

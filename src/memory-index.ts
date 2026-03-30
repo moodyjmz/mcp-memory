@@ -9,7 +9,7 @@ import type { MemoryMetadata, AddFactResult, QueryFactResult } from './types.js'
 const DEFAULT_DATA_DIR = path.join(os.homedir(), '.claude-memory');
 
 export interface MemoryIndex {
-  addFact(text: string, metadata: { category: string; file_path?: string; project?: string }): Promise<AddFactResult>;
+  addFact(text: string, metadata: { category: string; file_path?: string; project?: string; tags?: string }): Promise<AddFactResult>;
   queryFacts(text: string, topK?: number, project?: string): Promise<QueryFactResult[]>;
   deleteFact(id: string): Promise<void>;
 }
@@ -33,7 +33,10 @@ export function createMemoryIndex(
   return {
     async addFact(text, metadata) {
       const idx = await getIndex();
-      const vector = await embedFn(text);
+
+      // Embed text + tags together so tags enrich semantic search
+      const textToEmbed = metadata.tags ? `${text} ${metadata.tags}` : text;
+      const vector = await embedFn(textToEmbed);
 
       // Semantic dedup — reject if a very similar memory already exists
       const results = await idx.queryItems(vector, '', 1);
@@ -46,6 +49,7 @@ export function createMemoryIndex(
         category: metadata.category as MemoryMetadata['category'],
         file_path: metadata.file_path || '',
         project: metadata.project || '',
+        tags: metadata.tags || '',
       };
       const item = await idx.insertItem({ vector, metadata: fullMetadata });
       return { added: true, id: item.id };

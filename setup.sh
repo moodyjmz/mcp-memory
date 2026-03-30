@@ -50,6 +50,8 @@ Use `repo_link` when you discover how repos relate (provides, consumes, depends_
 
 Store silently but announce with a brief one-liner, e.g. "Storing: LESS overrides needed for escaped string interpolation". No need to ask permission — just be transparent about what goes in.
 
+When storing memories, always include a \`tags\` array of keywords that someone might use to search for this memory later. Think about synonyms, related concepts, and alternate phrasings — not just the literal terms in the text. For example, a memory about \`editor.jsx\` improvements might have \`tags: ["mobile", "editor", "patch", "bridge", "refactor", "code review", "editor.jsx"]\`. Good tags bridge the gap between how the memory is written and how someone might search for it later.
+
 When the user explicitly asks you to remember something permanently, use \`pinned: true\` on \`memory_store\`. Pinned memories are never evicted. Only pin when the user explicitly asks — normal codebase facts stay unpinned.
 <!-- /claude-memory-mcp -->
 BLOCK

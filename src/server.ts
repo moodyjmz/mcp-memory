@@ -86,8 +86,9 @@ server.registerTool('memory_store', {
     file_path: z.string().optional().describe('Related file path. Converted to relative (portable) on storage. Enables staleness detection.'),
     project: z.string().optional().describe('Project identifier for multi-project filtering'),
     pinned: z.boolean().optional().describe('Pin this memory so it is never evicted. Use for user-provided preferences and permanent facts.'),
+    tags: z.array(z.string()).optional().describe('Keywords/tags to improve search discoverability. These are embedded alongside the text for semantic matching.'),
   },
-}, async ({ text, category, file_path, project, pinned }) => {
+}, async ({ text, category, file_path, project, pinned, tags }) => {
   const db = getDefaultDb();
   const index = getDefaultIndex();
 
@@ -97,10 +98,13 @@ server.registerTool('memory_store', {
   // Store relative path (portable across machines)
   const storedPath = file_path ? toRelativePath(file_path) : undefined;
 
+  const tagsString = tags?.length ? tags.join(', ') : undefined;
+
   const result = await index.addFact(text, {
     category: category as MemoryCategory,
     file_path: storedPath,
     project: resolvedProject,
+    tags: tagsString,
   });
 
   if (!result.added) {
@@ -117,7 +121,7 @@ server.registerTool('memory_store', {
     };
   }
 
-  db.insertMemory(result.id, text, category as MemoryCategory, storedPath, git_sha, resolvedProject, pinned);
+  db.insertMemory(result.id, text, category as MemoryCategory, storedPath, git_sha, resolvedProject, pinned, tagsString);
 
   // Evict old memories if over limit
   const evicted = await evictIfNeeded();
@@ -132,6 +136,7 @@ server.registerTool('memory_store', {
         file_path: storedPath || null,
         project: resolvedProject || null,
         pinned: pinned || false,
+        tags: tags || null,
         ...(evicted > 0 ? { evicted } : {}),
       }, null, 2),
     }],
@@ -169,6 +174,7 @@ server.registerTool('memory_query', {
       file_path: row?.file_path || null,
       project: row?.project || null,
       date: row?.created_at || null,
+      tags: row?.tags || null,
       stale: staleness.stale,
       ...(staleness.commits_since ? { commits_since: staleness.commits_since } : {}),
       ...(staleness.reason ? { stale_reason: staleness.reason } : {}),

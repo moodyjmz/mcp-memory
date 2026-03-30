@@ -10,6 +10,7 @@ export interface MemoryMetadata {
   category: MemoryCategory;
   file_path: string;
   project: string;
+  tags: string; // comma-separated tags for search enrichment
 }
 
 export interface MemoryRow {
@@ -22,6 +23,7 @@ export interface MemoryRow {
   created_at: string;
   last_accessed: string | null;
   pinned: number; // 0 or 1 (SQLite boolean)
+  tags: string | null; // comma-separated tags for search enrichment
 }
 
 export interface StalenessResult {
