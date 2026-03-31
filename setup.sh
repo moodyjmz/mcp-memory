@@ -27,32 +27,15 @@ else
 <!-- claude-memory-mcp -->
 ## Codebase Memory (MCP)
 
-You have access to persistent memory tools via the `memory` MCP server.
+Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_query`, `memory_list`, `memory_forget`, `repo_link`, `repo_unlink`, `repo_map`. Project is auto-detected from git root.
 
-**MANDATORY FIRST ACTION — DO THIS BEFORE ANYTHING ELSE:**
-When a session starts (you will see a SessionStart hook message), you MUST:
-1. Tell the user: "Loading project memory..." (so they can see it happening)
-2. Call `memory_project_summary` with the detected project
-3. Only THEN respond to whatever the user asked
+**Session start (MANDATORY):** On SessionStart hook, call `memory_project_summary` (tell user "Loading project memory...") BEFORE responding. Use the project from the hook message, or auto-detect from file_path.
 
-Do NOT skip this. Do NOT respond to the user first. This provides critical project context that prevents wasted investigation time. If the hook detected a project, use that. Otherwise auto-detect from file_path.
+**When to store:** non-obvious architecture/conventions/gotchas, user corrections, cross-repo relationships (`repo_link`), and key learnings before context compaction. Check `repo_map` before cross-repo assumptions. Check `memory_query` before exploring unfamiliar code.
 
-Use memory proactively throughout the session:
-- **When you learn something non-obvious**: store architectural decisions, conventions, gotchas, and preferences
-- **When the user corrects your approach**: store the correction so you don't repeat the mistake
-- **When you discover how systems connect**: store cross-repo relationships and integration points
-- **Before exploring unfamiliar code**: check if you already know something relevant
-- **Before context compaction**: store key learnings from the session — decisions made, gotchas found, conventions discovered — before they're compressed away
+**How to store:** Silently, with a one-liner announcement (e.g. "Storing: LESS overrides needed for escaped string interpolation"). Always include a `tags` array that adds NEW search surface — don't repeat words from the text (already embedded). Use synonyms and related terms. Example: text "Rate limiter uses sliding window with Redis" → `tags: ["throttling", "API", "backpressure", "quota", "429"]`.
 
-The tools are: `memory_store`, `memory_query`, `memory_list`, `memory_forget`, `repo_link`, `repo_unlink`, `repo_map`.
-Project is auto-detected from git root when you provide a file path.
-Use `repo_link` when you discover how repos relate (provides, consumes, depends_on, builds_from, extends). Use `repo_map` to check known relationships before making cross-repo assumptions.
-
-Store silently but announce with a brief one-liner, e.g. "Storing: LESS overrides needed for escaped string interpolation". No need to ask permission — just be transparent about what goes in.
-
-When storing memories, always include a \`tags\` array of keywords that someone might use to search for this memory later. Think about synonyms, related concepts, and alternate phrasings — not just the literal terms in the text. For example, a memory about \`editor.jsx\` improvements might have \`tags: ["mobile", "editor", "patch", "bridge", "refactor", "code review", "editor.jsx"]\`. Good tags bridge the gap between how the memory is written and how someone might search for it later.
-
-When the user explicitly asks you to remember something permanently, use \`pinned: true\` on \`memory_store\`. Pinned memories are never evicted. Only pin when the user explicitly asks — normal codebase facts stay unpinned.
+**Pinning:** Use `pinned: true` only when the user explicitly asks to remember something permanently.
 <!-- /claude-memory-mcp -->
 BLOCK
   echo "    Added memory instructions to $CLAUDE_MD"
