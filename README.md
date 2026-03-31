@@ -22,7 +22,7 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 
 | Tool | Description |
 |------|-------------|
-| `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold). Captures git SHA for file-linked memories. Auto-detects project from git root. |
+| `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold). Captures git SHA for file-linked memories. Auto-detects project from git root. Accepts optional `tags` array for search enrichment. |
 | `memory_query` | Semantic search. Returns top-K results with staleness flags. Optional project filter. Tracks access for eviction. |
 | `memory_list` | List memories filtered by category and/or project. |
 | `memory_forget` | Remove a memory by ID from both stores. |
@@ -38,6 +38,20 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 ### Cross-Repo Knowledge
 
 Use `repo_link` to record how projects relate — e.g. "core-lib provides shared types consumed by frontend". These relationships are stored in a dedicated table (not the vector index) for fast structured queries. Use `repo_map` to see all connections for a project.
+
+### Tags
+
+`memory_store` accepts an optional `tags` array of keywords to improve search discoverability. Tags are embedded alongside the memory text into the vector, so semantic queries matching tag terms score higher — even when those words don't appear in the memory itself.
+
+```json
+{
+  "text": "Rate limiter uses a sliding window algorithm with Redis sorted sets",
+  "category": "architecture",
+  "tags": ["throttling", "API", "redis", "rate-limit", "sliding-window"]
+}
+```
+
+Tags are stored as a comma-separated string in SQLite and returned in `memory_query` results.
 
 ### Eviction
 
