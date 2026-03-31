@@ -47,7 +47,7 @@ Use `repo_link` to record how projects relate — e.g. "core-lib provides shared
 {
   "text": "Rate limiter uses a sliding window algorithm with Redis sorted sets",
   "category": "architecture",
-  "tags": ["throttling", "API", "redis", "rate-limit", "sliding-window"]
+  "tags": ["throttling", "API", "backpressure", "quota", "429"]
 }
 ```
 
