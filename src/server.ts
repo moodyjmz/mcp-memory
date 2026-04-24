@@ -149,7 +149,7 @@ server.registerTool('memory_store', {
 // ─── memory_query ────────────────────────────────────────────────────────────
 
 server.registerTool('memory_query', {
-  description: 'Search memories by semantic similarity. Returns the most relevant stored facts, with staleness flags for file-linked memories.',
+  description: 'Search memories by semantic similarity. Returns the most relevant stored facts, with staleness flags for file-linked memories. Also returns also_relevant: memories sharing tags with the results but not semantically close enough to rank — these are often causally related facts you should read alongside the main results.',
   inputSchema: {
     text: z.string().describe('What to search for'),
     topK: z.number().optional().describe('Number of results to return (default 5)'),
@@ -185,10 +185,42 @@ server.registerTool('memory_query', {
     };
   });
 
+  // Tag-based also_relevant: memories sharing tags with results but not already returned.
+  // Catches causally related facts that are semantically distant.
+  const resultIds = new Set(enriched.map(r => r.id));
+  const allResultTags = new Set(
+    enriched.flatMap(r => r.tags ? r.tags.split(',').map(t => t.trim()).filter(Boolean) : [])
+  );
+
+  type AlsoRelevant = { id: string; excerpt: string; category: string; tags: string[] | null; shared_tags: number };
+  let alsoRelevant: AlsoRelevant[] = [];
+
+  if (allResultTags.size > 0 && project) {
+    const allProjectMemories = db.listMemories(undefined, project);
+
+    alsoRelevant = allProjectMemories
+      .filter(row => !resultIds.has(row.id) && row.tags)
+      .map(row => {
+        const memTags = row.tags!.split(',').map(t => t.trim()).filter(Boolean);
+        const shared = memTags.filter(t => allResultTags.has(t)).length;
+        return { row, shared };
+      })
+      .filter(({ shared }) => shared > 0)
+      .sort((a, b) => b.shared - a.shared)
+      .slice(0, 3)
+      .map(({ row, shared }) => ({
+        id: row.id,
+        excerpt: row.text.length > 100 ? row.text.slice(0, 97) + '...' : row.text,
+        category: row.category,
+        tags: row.tags ? row.tags.split(',').map(t => t.trim()).filter(Boolean) : null,
+        shared_tags: shared,
+      }));
+  }
+
   return {
     content: [{
       type: 'text' as const,
-      text: JSON.stringify(enriched, null, 2),
+      text: JSON.stringify({ results: enriched, also_relevant: alsoRelevant }, null, 2),
     }],
   };
 });
