@@ -87,8 +87,9 @@ server.registerTool('memory_store', {
     project: z.string().optional().describe('Project identifier for multi-project filtering'),
     pinned: z.boolean().optional().describe('Pin this memory so it is never evicted. Use for user-provided preferences and permanent facts.'),
     tags: z.array(z.string()).optional().describe('Keywords/tags to improve search discoverability. These are embedded alongside the text for semantic matching.'),
+    load_with: z.array(z.string()).optional().describe('IDs of other memories that should always surface alongside this one. Use when two facts are only useful together.'),
   },
-}, async ({ text, category, file_path, project, pinned, tags }) => {
+}, async ({ text, category, file_path, project, pinned, tags, load_with }) => {
   const db = getDefaultDb();
   const index = getDefaultIndex();
 
@@ -99,6 +100,7 @@ server.registerTool('memory_store', {
   const storedPath = file_path ? toRelativePath(file_path) : undefined;
 
   const tagsString = tags?.length ? tags.join(', ') : undefined;
+  const loadWithString = load_with?.length ? load_with.join(',') : undefined;
 
   const result = await index.addFact(text, {
     category: category as MemoryCategory,
@@ -121,7 +123,7 @@ server.registerTool('memory_store', {
     };
   }
 
-  db.insertMemory(result.id, text, category as MemoryCategory, storedPath, git_sha, resolvedProject, pinned, tagsString);
+  db.insertMemory(result.id, text, category as MemoryCategory, storedPath, git_sha, resolvedProject, pinned, tagsString, loadWithString);
 
   // Evict old memories if over limit
   const evicted = await evictIfNeeded();
@@ -137,6 +139,7 @@ server.registerTool('memory_store', {
         project: resolvedProject || null,
         pinned: pinned || false,
         tags: tags || null,
+        load_with: load_with || null,
         ...(evicted > 0 ? { evicted } : {}),
       }, null, 2),
     }],
@@ -168,13 +171,14 @@ server.registerTool('memory_query', {
 
     return {
       id: r.id,
-      text: r.text,
-      category: r.category,
+      text: row?.text ?? r.text,         // SQL is authoritative (survives memory_update)
+      category: row?.category ?? r.category,
       score: Math.round(r.score * 1000) / 1000,
       file_path: row?.file_path || null,
       project: row?.project || null,
       date: row?.created_at || null,
       tags: row?.tags || null,
+      load_with: row?.load_with ? row.load_with.split(',').map(s => s.trim()) : null,
       stale: staleness.stale,
       ...(staleness.commits_since ? { commits_since: staleness.commits_since } : {}),
       ...(staleness.reason ? { stale_reason: staleness.reason } : {}),
@@ -205,6 +209,82 @@ server.registerTool('memory_list', {
     content: [{
       type: 'text' as const,
       text: JSON.stringify(rows, null, 2),
+    }],
+  };
+});
+
+// ─── memory_update ───────────────────────────────────────────────────────────
+
+server.registerTool('memory_update', {
+  description: 'Amend an existing memory — update text, tags, category, file_path, pinned, or load_with without deleting and re-creating. If text or tags change the vector is re-embedded automatically.',
+  inputSchema: {
+    id: z.string().describe('The memory ID to update'),
+    text: z.string().optional().describe('New text (triggers re-embedding)'),
+    category: z.enum(CATEGORIES).optional().describe('New category'),
+    file_path: z.string().nullable().optional().describe('New file path (null to clear)'),
+    tags: z.array(z.string()).nullable().optional().describe('Replace tags (null to clear)'),
+    pinned: z.boolean().optional().describe('Set pinned status'),
+    load_with: z.array(z.string()).nullable().optional().describe('Replace load_with IDs (null to clear). IDs of memories that should always surface alongside this one.'),
+  },
+}, async ({ id, text, category, file_path, tags, pinned, load_with }) => {
+  const db = getDefaultDb();
+  const index = getDefaultIndex();
+
+  const existing = db.getMemory(id);
+  if (!existing) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ updated: false, reason: 'Memory not found' }, null, 2),
+      }],
+    };
+  }
+
+  const newText = text ?? existing.text;
+  const newTags = tags !== undefined
+    ? (tags === null ? null : tags.join(', '))
+    : existing.tags;
+
+  // Re-embed if text or tags changed
+  const textChanged = text !== undefined && text !== existing.text;
+  const tagsChanged = tags !== undefined && (tags === null ? existing.tags !== null : tags.join(', ') !== existing.tags);
+
+  if (textChanged || tagsChanged) {
+    await index.updateFact(id, newText, {
+      category: (category ?? existing.category) as string,
+      file_path: file_path !== undefined ? (file_path ?? undefined) : (existing.file_path ?? undefined),
+      project: existing.project ?? undefined,
+      tags: newTags ?? undefined,
+    });
+  }
+
+  const loadWithString = load_with !== undefined
+    ? (load_with === null ? null : load_with.join(','))
+    : undefined;
+
+  db.updateMemory(id, {
+    ...(text !== undefined ? { text } : {}),
+    ...(category !== undefined ? { category: category as MemoryCategory } : {}),
+    ...(file_path !== undefined ? { file_path } : {}),
+    ...(tags !== undefined ? { tags: newTags } : {}),
+    ...(pinned !== undefined ? { pinned } : {}),
+    ...(loadWithString !== undefined ? { load_with: loadWithString } : {}),
+  });
+
+  const updated = db.getMemory(id);
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({
+        updated: true,
+        id,
+        text: updated?.text,
+        category: updated?.category,
+        tags: updated?.tags,
+        load_with: updated?.load_with ? updated.load_with.split(',').map(s => s.trim()) : null,
+        pinned: updated?.pinned === 1,
+        re_embedded: textChanged || tagsChanged,
+      }, null, 2),
     }],
   };
 });

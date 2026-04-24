@@ -10,6 +10,7 @@ const DEFAULT_DATA_DIR = path.join(os.homedir(), '.claude-memory');
 
 export interface MemoryIndex {
   addFact(text: string, metadata: { category: string; file_path?: string; project?: string; tags?: string }): Promise<AddFactResult>;
+  updateFact(id: string, text: string, metadata: { category: string; file_path?: string; project?: string; tags?: string }): Promise<void>;
   queryFacts(text: string, topK?: number, project?: string): Promise<QueryFactResult[]>;
   deleteFact(id: string): Promise<void>;
 }
@@ -53,6 +54,24 @@ export function createMemoryIndex(
       };
       const item = await idx.insertItem({ vector, metadata: fullMetadata });
       return { added: true, id: item.id };
+    },
+
+    async updateFact(id, text, metadata) {
+      const idx = await getIndex();
+      const textToEmbed = metadata.tags ? `${text} ${metadata.tags}` : text;
+      const vector = await embedFn(textToEmbed);
+
+      const fullMetadata: MemoryMetadata = {
+        text,
+        category: metadata.category as MemoryMetadata['category'],
+        file_path: metadata.file_path || '',
+        project: metadata.project || '',
+        tags: metadata.tags || '',
+      };
+
+      // Replace vector item in-place by deleting and re-inserting with same ID
+      try { await idx.deleteItem(id); } catch { /* not found, insert fresh */ }
+      await idx.insertItem({ id, vector, metadata: fullMetadata });
     },
 
     async queryFacts(text, topK = 5, project?) {
