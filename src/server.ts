@@ -321,6 +321,63 @@ server.registerTool('memory_forget', {
   };
 });
 
+// ─── memory_graph ────────────────────────────────────────────────────────────
+
+server.registerTool('memory_graph', {
+  description: 'Compact table-of-contents view of all memories for a project — IDs, short excerpts, tags, and category grouped together. Use at session start to see what exists before querying. Much lighter than memory_list.',
+  inputSchema: {
+    project: z.string().optional().describe('Project identifier. Auto-detected from file_path if not given.'),
+    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given.'),
+  },
+}, async ({ project, file_path }) => {
+  const db = getDefaultDb();
+
+  const resolvedProject = project || (file_path ? getProjectId(file_path) : null) || undefined;
+  if (!resolvedProject) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ error: 'Could not determine project. Provide project or file_path.' }, null, 2),
+      }],
+    };
+  }
+
+  const all = db.listMemories(undefined, resolvedProject);
+
+  const byCategory: Record<string, Array<{
+    id: string;
+    excerpt: string;
+    tags: string[] | null;
+    file_path: string | null;
+    pinned: boolean;
+    load_with: string[] | null;
+  }>> = {};
+
+  for (const row of all) {
+    const cat = row.category;
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push({
+      id: row.id,
+      excerpt: row.text.length > 120 ? row.text.slice(0, 117) + '...' : row.text,
+      tags: row.tags ? row.tags.split(',').map(t => t.trim()) : null,
+      file_path: row.file_path || null,
+      pinned: row.pinned === 1,
+      load_with: row.load_with ? row.load_with.split(',').map(s => s.trim()) : null,
+    });
+  }
+
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({
+        project: resolvedProject,
+        total: all.length,
+        by_category: byCategory,
+      }, null, 2),
+    }],
+  };
+});
+
 // ─── repo_link ───────────────────────────────────────────────────────────────
 
 server.registerTool('repo_link', {
