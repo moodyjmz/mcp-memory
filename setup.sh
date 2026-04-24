@@ -27,13 +27,15 @@ else
 <!-- claude-memory-mcp -->
 ## Codebase Memory (MCP)
 
-Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_query`, `memory_list`, `memory_forget`, `repo_link`, `repo_unlink`, `repo_map`. Project is auto-detected from git root.
+Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_update`, `memory_query`, `memory_graph`, `memory_list`, `memory_forget`, `repo_link`, `repo_unlink`, `repo_map`, `memory_project_summary`. Project is auto-detected from git root.
 
-**Session start (MANDATORY):** On SessionStart hook, call `memory_project_summary` (tell user "Loading project memory...") BEFORE responding. Use the project from the hook message, or auto-detect from file_path.
+**Session start (MANDATORY):** On SessionStart hook, call `memory_project_summary` (tell user "Loading project memory...") BEFORE responding. Use the project from the hook message, or auto-detect from file_path. For unfamiliar projects also call `memory_graph` to get a scannable overview of all stored memories before querying.
 
 **When to store:** non-obvious architecture/conventions/gotchas, user corrections, cross-repo relationships (`repo_link`), and key learnings before context compaction. Check `repo_map` before cross-repo assumptions. Check `memory_query` before exploring unfamiliar code.
 
 **How to store:** Silently, with a one-liner announcement (e.g. "Storing: LESS overrides needed for escaped string interpolation"). Always include a `tags` array that adds NEW search surface — don't repeat words from the text (already embedded). Use synonyms and related terms. Example: text "Rate limiter uses sliding window with Redis" → `tags: ["throttling", "API", "backpressure", "quota", "429"]`.
+
+**Updating memories:** Use `memory_update` to amend existing memories — add tags, set load_with, fix text — without deleting and re-creating. Use `load_with` to couple two memories that are only useful together; set it on both so they surface together.
 
 **Pinning:** Use `pinned: true` only when the user explicitly asks to remember something permanently.
 <!-- /claude-memory-mcp -->
@@ -73,7 +75,9 @@ const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
 // --- Permissions ---
 const memoryTools = [
   'mcp__memory__memory_store',
+  'mcp__memory__memory_update',
   'mcp__memory__memory_query',
+  'mcp__memory__memory_graph',
   'mcp__memory__memory_list',
   'mcp__memory__memory_forget',
   'mcp__memory__memory_project_summary',
