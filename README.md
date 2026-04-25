@@ -202,6 +202,16 @@ Then add the hook config and memory tool permissions to `~/.claude/settings.json
 
 All hooks output colour-coded console messages (cyan/red/yellow) for visibility.
 
+## Upgrading
+
+```bash
+git pull && npm run setup
+```
+
+`setup.sh` builds the TypeScript, re-registers the MCP server, replaces the `~/.claude/CLAUDE.md` instructions block in-place, and merges any new tool permissions into `settings.json`. Running it again on an existing install is safe and idempotent.
+
+**Database** — no action needed. New columns (`tags`, `load_with`, etc.) are added automatically via `ALTER TABLE` migrations on first startup. Existing memories are untouched.
+
 ## Gotchas
 
 - **Build before first use** — the server runs from `dist/`, not `src/`. You must run `npm run build` after cloning or the server won't start.
