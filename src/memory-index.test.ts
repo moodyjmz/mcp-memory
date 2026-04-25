@@ -88,6 +88,27 @@ describe('memory-index', () => {
     expect(found).toBeUndefined();
   });
 
+  it('updateFact replaces vector and text is queryable under new content', async () => {
+    const { id } = await index.addFact('alpha bravo charlie', { category: 'gotcha' });
+
+    await index.updateFact(id, 'completely different updated content about databases', {
+      category: 'architecture',
+    });
+
+    // New content should be findable
+    const results = await index.queryFacts('completely different updated content about databases', 5);
+    const found = results.find(r => r.id === id);
+    expect(found).toBeDefined();
+    expect(found!.text).toBe('completely different updated content about databases');
+  });
+
+  it('updateFact on missing id inserts fresh', async () => {
+    // Should not throw even if id doesn't exist in index
+    await expect(
+      index.updateFact('nonexistent-id', 'some text', { category: 'gotcha' })
+    ).resolves.not.toThrow();
+  });
+
   it('filters by project', async () => {
     await index.addFact('web-apps uses LESS for styling and theming', {
       category: 'architecture',

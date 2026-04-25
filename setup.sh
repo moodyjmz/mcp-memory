@@ -18,12 +18,7 @@ claude mcp add memory -s user "$NODE_BIN" "$SERVER_PATH"
 echo "==> Configuring global CLAUDE.md..."
 mkdir -p "$HOME/.claude"
 
-# Only append if not already present
-if [ -f "$CLAUDE_MD" ] && grep -q "$MARKER" "$CLAUDE_MD"; then
-  echo "    Memory instructions already in $CLAUDE_MD — skipping."
-else
-  cat >> "$CLAUDE_MD" << 'BLOCK'
-
+NEW_BLOCK='
 <!-- claude-memory-mcp -->
 ## Codebase Memory (MCP)
 
@@ -38,8 +33,25 @@ Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_up
 **Updating memories:** Use `memory_update` to amend existing memories — add tags, set load_with, fix text — without deleting and re-creating. Use `load_with` to couple two memories that are only useful together; set it on both so they surface together.
 
 **Pinning:** Use `pinned: true` only when the user explicitly asks to remember something permanently.
-<!-- /claude-memory-mcp -->
-BLOCK
+<!-- /claude-memory-mcp -->'
+
+if [ -f "$CLAUDE_MD" ] && grep -q "$MARKER" "$CLAUDE_MD"; then
+  # Replace existing block (handles upgrades — existing users get updated instructions)
+  printf '%s' "$NEW_BLOCK" | python3 -c "
+import re, sys
+new_block = sys.stdin.read()
+content = open(sys.argv[1]).read()
+updated = re.sub(
+    r'\n<!-- claude-memory-mcp -->.*?<!-- /claude-memory-mcp -->',
+    new_block,
+    content,
+    flags=re.DOTALL
+)
+open(sys.argv[1], 'w').write(updated)
+" "$CLAUDE_MD"
+  echo "    Updated memory instructions in $CLAUDE_MD"
+else
+  echo "$NEW_BLOCK" >> "$CLAUDE_MD"
   echo "    Added memory instructions to $CLAUDE_MD"
 fi
 
