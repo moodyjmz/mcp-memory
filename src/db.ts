@@ -45,9 +45,11 @@ export interface MemoryDb {
 
 export function createMemoryDb(dbPath: string): MemoryDb {
   const dir = path.dirname(dbPath);
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   const db: BetterSqlite3.Database = new Database(dbPath);
+  // Restrict DB file to owner-only after creation (no-op if already exists with correct perms)
+  try { fs.chmodSync(dbPath, 0o600); } catch { /* ignore on unsupported filesystems */ }
   db.pragma('journal_mode = WAL');
 
   db.exec(`
