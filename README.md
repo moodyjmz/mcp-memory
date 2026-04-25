@@ -131,6 +131,34 @@ npm run test:watch  # Watch mode tests
 
 The embedding model (`Xenova/all-MiniLM-L6-v2`) runs locally — no API calls. It loads lazily on first use (~30MB download, cached after that).
 
+## Security
+
+### Prompt injection → shell execution: the core attack surface
+
+This server stores content that Claude encounters in the wild (code, docs, README text) and later acts on that stored content to run git commands (staleness detection). That creates a path:
+
+> malicious content in repo → prompt injection tricks Claude into calling `memory_store` with a crafted `file_path` → stored value later used in a git invocation → arbitrary code execution
+
+**The rule for contributors**: any code that reads `file_path`, `git_sha`, or any other stored value and passes it to a subprocess must use `spawnSync` / `execFile` with an explicit args array — never string interpolation into a shell command. The shell never sees user-controlled data that way.
+
+```ts
+// WRONG — file_path or git_sha in the string = shell injection risk
+execSync(`git log ${git_sha}..HEAD -- "${filename}"`);
+
+// RIGHT — args array, no shell involved
+spawnSync('git', ['log', `${git_sha}..HEAD`, '--', filename]);
+```
+
+`staleness.ts` is the main place this matters today. `server.ts` runs fixed git commands with only `cwd` derived from user input — `cwd` affects the working directory but is not part of the command string, so those calls are safe.
+
+### SHA validation
+
+Before any stored `git_sha` is used as a git revision, `staleness.ts` validates it matches `/^[0-9a-f]{7,64}$/i`. Values that fail — including anything with `;`, spaces, or shell metacharacters — are silently rejected, returning `{ stale: false }`. Any future code using stored SHAs as git args should apply the same check.
+
+### Data directory permissions
+
+`~/.claude-memory/` is created with mode `0700` and `memory.db` is set to `0600` at creation time, so memories are readable only by the owning user. Memories can contain sensitive context about codebases and personal workflows, so they should not be world-readable.
+
 ## Dependencies
 
 **Runtime:**
