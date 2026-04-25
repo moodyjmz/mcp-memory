@@ -1,3 +1,5 @@
+// Note: cross-repo relationships go in repo_relationships via repo_link/repo_map, not as memories.
+// 'relationship' is kept here only for backward-compat with any existing stored memories.
 export const CATEGORIES = ['architecture', 'convention', 'gotcha', 'decision', 'preference', 'relationship'] as const;
 
 export type MemoryCategory = typeof CATEGORIES[number];

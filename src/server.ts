@@ -98,7 +98,9 @@ server.registerTool('memory_store', {
   // Auto-detect project from git remote URL if not provided
   const resolvedProject = project || (file_path ? getProjectId(file_path) : null) || undefined;
   const git_sha = file_path ? getGitSha(file_path) : null;
-  // Store relative path (portable across machines)
+  // Store relative path (portable across machines). Note: staleness detection resolves
+  // relative paths against process.cwd() of the MCP server, so it only reliably fires
+  // when the server runs from the same project root. Absolute paths are always reliable.
   const storedPath = file_path ? toRelativePath(file_path) : undefined;
 
   const tagsString = tags?.length ? tags.join(', ') : undefined;
@@ -151,17 +153,21 @@ server.registerTool('memory_store', {
 // ─── memory_query ────────────────────────────────────────────────────────────
 
 server.registerTool('memory_query', {
-  description: 'Search memories by semantic similarity. Returns the most relevant stored facts, with staleness flags for file-linked memories. Also returns also_relevant: memories sharing tags with the results but not semantically close enough to rank — these are often causally related facts you should read alongside the main results.',
+  description: 'Search memories by semantic similarity. Returns the most relevant stored facts, with staleness flags for file-linked memories. Also returns also_relevant: memories sharing tags with the results but not semantically close enough to rank — these are often causally related facts you should read alongside the main results. also_relevant is only populated when a project is known (via project or file_path).',
   inputSchema: {
     text: z.string().describe('What to search for'),
     topK: z.number().optional().describe('Number of results to return (default 5)'),
     project: z.string().optional().describe('Filter results to a specific project'),
+    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given'),
   },
-}, async ({ text, topK, project }) => {
+}, async ({ text, topK, project, file_path }) => {
   const db = getDefaultDb();
   const index = getDefaultIndex();
 
-  const results = await index.queryFacts(text, topK || 5, project);
+  // Auto-detect project from file_path if not explicitly provided (mirrors memory_store behaviour)
+  const resolvedProject = project || (file_path ? getProjectId(file_path) : null) || undefined;
+
+  const results = await index.queryFacts(text, topK || 5, resolvedProject);
 
   // Track access for eviction
   const ids = results.map(r => r.id);
@@ -194,11 +200,11 @@ server.registerTool('memory_query', {
     enriched.flatMap(r => r.tags ? r.tags.split(',').map(t => t.trim()).filter(Boolean) : [])
   );
 
-  type AlsoRelevant = { id: string; excerpt: string; category: string; tags: string[] | null; shared_tags: number };
+  type AlsoRelevant = { id: string; text: string; category: string; tags: string[] | null; shared_tags: number };
   let alsoRelevant: AlsoRelevant[] = [];
 
-  if (allResultTags.size > 0 && project) {
-    const allProjectMemories = db.listMemories(undefined, project);
+  if (allResultTags.size > 0 && resolvedProject) {
+    const allProjectMemories = db.listMemories(undefined, resolvedProject);
 
     alsoRelevant = allProjectMemories
       .filter(row => !resultIds.has(row.id) && row.tags)
@@ -212,7 +218,7 @@ server.registerTool('memory_query', {
       .slice(0, 3)
       .map(({ row, shared }) => ({
         id: row.id,
-        excerpt: row.text.length > 100 ? row.text.slice(0, 97) + '...' : row.text,
+        text: row.text,
         category: row.category,
         tags: row.tags ? row.tags.split(',').map(t => t.trim()).filter(Boolean) : null,
         shared_tags: shared,
@@ -509,7 +515,7 @@ server.registerTool('memory_project_summary', {
     .filter(r => r.pinned === 1)
     .map(r => ({ id: r.id, text: r.text, category: r.category }));
 
-  // 5 most recently accessed memories
+  // 5 most recently accessed memories (excerpts — full text via memory_query)
   const recent = [...allMemories]
     .sort((a, b) => {
       const aDate = a.last_accessed || a.created_at;
@@ -517,7 +523,11 @@ server.registerTool('memory_project_summary', {
       return bDate.localeCompare(aDate);
     })
     .slice(0, 5)
-    .map(r => ({ id: r.id, text: r.text, category: r.category }));
+    .map(r => ({
+      id: r.id,
+      text: r.text.length > 120 ? r.text.slice(0, 117) + '...' : r.text,
+      category: r.category,
+    }));
 
   // Repo relationships
   const relationships = db.getRepoMap(resolvedProject);
