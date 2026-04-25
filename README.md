@@ -24,7 +24,7 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 |------|-------------|
 | `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold). Captures git SHA for file-linked memories. Auto-detects project from git root. Accepts optional `tags` and `load_with` arrays. |
 | `memory_update` | Amend an existing memory — update text, tags, category, file_path, pinned, or load_with without deleting and re-creating. Re-embeds automatically if text or tags change. |
-| `memory_query` | Semantic search. Returns `{ results, also_relevant }` — results are top-K semantic matches with staleness flags; also_relevant are tag-matched memories not in the main results (often causally related). |
+| `memory_query` | Semantic search. Returns `{ results, also_relevant }` — results are top-K semantic matches with staleness flags; also_relevant are tag-matched memories not in the main results (often causally related). Accepts `file_path` to auto-detect project (mirrors `memory_store`). |
 | `memory_graph` | Compact table-of-contents of all project memories grouped by category, with 120-char excerpts, tags, and load_with. Use at session start to see everything that exists before querying. |
 | `memory_list` | List memories filtered by category and/or project. Returns full rows. |
 | `memory_forget` | Remove a memory by ID from both stores. |
@@ -72,9 +72,9 @@ Use `memory_update` to add `load_with` to existing memories when you discover co
 
 ### also_relevant in memory_query
 
-`memory_query` returns `{ results, also_relevant }`. The `also_relevant` array contains up to 3 memories that share tags with the main results but weren't semantically close enough to rank. These are often causally related facts with different vocabulary — the kind semantic search alone would miss.
+`memory_query` returns `{ results, also_relevant }`. The `also_relevant` array contains up to 3 memories that share tags with the main results but weren't semantically close enough to rank. These are often causally related facts with different vocabulary — the kind semantic search alone would miss. Full memory text is returned (not excerpts), so no follow-up call is needed.
 
-Only populated when the results have tags and a project is known.
+Only populated when the results have tags and a project is known (via `project` or `file_path`).
 
 ### Eviction
 
