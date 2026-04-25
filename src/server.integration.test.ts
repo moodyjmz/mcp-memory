@@ -64,6 +64,22 @@ describe('integration: store → query → forget', () => {
     expect(db.countMemories()).toBe(1);
   });
 
+  it('update: amended text is returned by subsequent query', async () => {
+    const { id } = await store('original fact about LESS variables', 'gotcha', 'web-apps');
+
+    // Simulate memory_update — update DB text + re-embed
+    await index.updateFact(id, 'amended fact about webpack config', { category: 'gotcha', project: 'web-apps' });
+    db.updateMemory(id, { text: 'amended fact about webpack config' });
+
+    const results = await index.queryFacts('amended fact about webpack config', 5);
+    const found = results.find(r => r.id === id);
+    expect(found).toBeDefined();
+
+    // SQL row should reflect the update (SQL is authoritative for display)
+    const row = db.getMemory(id)!;
+    expect(row.text).toBe('amended fact about webpack config');
+  });
+
   it('eviction removes least-accessed memories', async () => {
     const maxMemories = 3;
 

@@ -24,6 +24,7 @@ export interface MemoryRow {
   last_accessed: string | null;
   pinned: number; // 0 or 1 (SQLite boolean)
   tags: string | null; // comma-separated tags for search enrichment
+  load_with: string | null; // comma-separated memory IDs to auto-surface with this one
 }
 
 export interface StalenessResult {

@@ -22,9 +22,11 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 
 | Tool | Description |
 |------|-------------|
-| `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold). Captures git SHA for file-linked memories. Auto-detects project from git root. Accepts optional `tags` array for search enrichment. |
-| `memory_query` | Semantic search. Returns top-K results with staleness flags. Optional project filter. Tracks access for eviction. |
-| `memory_list` | List memories filtered by category and/or project. |
+| `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold). Captures git SHA for file-linked memories. Auto-detects project from git root. Accepts optional `tags` and `load_with` arrays. |
+| `memory_update` | Amend an existing memory — update text, tags, category, file_path, pinned, or load_with without deleting and re-creating. Re-embeds automatically if text or tags change. |
+| `memory_query` | Semantic search. Returns `{ results, also_relevant }` — results are top-K semantic matches with staleness flags; also_relevant are tag-matched memories not in the main results (often causally related). |
+| `memory_graph` | Compact table-of-contents of all project memories grouped by category, with 120-char excerpts, tags, and load_with. Use at session start to see everything that exists before querying. |
+| `memory_list` | List memories filtered by category and/or project. Returns full rows. |
 | `memory_forget` | Remove a memory by ID from both stores. |
 | `repo_link` | Record a cross-repo relationship (provides, consumes, depends_on, builds_from, extends). |
 | `repo_unlink` | Remove a cross-repo relationship by ID. |
@@ -41,7 +43,7 @@ Use `repo_link` to record how projects relate — e.g. "core-lib provides shared
 
 ### Tags
 
-`memory_store` accepts an optional `tags` array of keywords to improve search discoverability. Tags are embedded alongside the memory text into the vector, so semantic queries matching tag terms score higher — even when those words don't appear in the memory itself.
+`memory_store` and `memory_update` accept an optional `tags` array of keywords to improve search discoverability. Tags are embedded alongside the memory text into the vector, so semantic queries matching tag terms score higher — even when those words don't appear in the memory itself. They also drive `also_relevant` in `memory_query`.
 
 ```json
 {
@@ -52,6 +54,27 @@ Use `repo_link` to record how projects relate — e.g. "core-lib provides shared
 ```
 
 Tags are stored as a comma-separated string in SQLite and returned in `memory_query` results.
+
+### Coupling memories with `load_with`
+
+When two facts are only useful together — e.g. a root cause and its implication — mark them with each other's IDs via `load_with`. They'll surface together in `memory_query` results as part of the `also_relevant` set.
+
+```json
+{
+  "text": "copy:images-app reads from source tree, not BUILD_ROOT",
+  "category": "gotcha",
+  "tags": ["grunt", "deploy", "images"],
+  "load_with": ["<id-of-the-deploy-theme-images-memory>"]
+}
+```
+
+Use `memory_update` to add `load_with` to existing memories when you discover coupling mid-session rather than having to predict it at store-time.
+
+### also_relevant in memory_query
+
+`memory_query` returns `{ results, also_relevant }`. The `also_relevant` array contains up to 3 memories that share tags with the main results but weren't semantically close enough to rank. These are often causally related facts with different vocabulary — the kind semantic search alone would miss.
+
+Only populated when the results have tags and a project is known.
 
 ### Eviction
 
@@ -101,8 +124,10 @@ npm run test:watch  # Watch mode tests
 ## How it works
 
 1. **Store**: Text is embedded locally, checked against existing vectors (cosine > 0.85 = duplicate), then stored in both Vectra (for search) and SQLite (for metadata). Eviction runs if over limit.
-2. **Query**: Input is embedded, Vectra returns nearest neighbours (optionally filtered by project), SQLite enriches with metadata, staleness is checked via `git log {sha}..HEAD -- {file}`, and access timestamps are updated.
-3. **Forget**: Removes from both Vectra index and SQLite.
+2. **Update**: SQL fields (category, tags, pinned, load_with, file_path) update in SQLite only. If text or tags change, the Vectra vector is replaced in-place (delete + re-insert with same ID). SQL values are authoritative for display.
+3. **Query**: Input is embedded, Vectra returns nearest neighbours (optionally filtered by project), SQLite enriches with metadata and staleness. Tag-based `also_relevant` is computed from all project memories sharing tags with the results.
+4. **Graph**: `memory_graph` lists all project memories from SQLite grouped by category — no vector lookup needed.
+5. **Forget**: Removes from both Vectra index and SQLite.
 
 The embedding model (`Xenova/all-MiniLM-L6-v2`) runs locally — no API calls. It loads lazily on first use (~30MB download, cached after that).
 
@@ -138,7 +163,9 @@ Then add the hook config and memory tool permissions to `~/.claude/settings.json
   "permissions": {
     "allow": [
       "mcp__memory__memory_store",
+      "mcp__memory__memory_update",
       "mcp__memory__memory_query",
+      "mcp__memory__memory_graph",
       "mcp__memory__memory_list",
       "mcp__memory__memory_forget",
       "mcp__memory__memory_project_summary",

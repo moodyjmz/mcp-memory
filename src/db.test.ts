@@ -148,6 +148,94 @@ describe('db', () => {
   });
 });
 
+describe('updateMemory', () => {
+  let db: MemoryDb;
+  let dir: string;
+
+  beforeEach(() => {
+    ({ db, dir } = createTestDb());
+    db.insertMemory('m1', 'original text', 'gotcha', '/a/b.ts', null, 'proj', false, 'tag1, tag2', null);
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('updates text', () => {
+    db.updateMemory('m1', { text: 'updated text' });
+    expect(db.getMemory('m1')!.text).toBe('updated text');
+  });
+
+  it('updates category', () => {
+    db.updateMemory('m1', { category: 'architecture' });
+    expect(db.getMemory('m1')!.category).toBe('architecture');
+  });
+
+  it('updates tags', () => {
+    db.updateMemory('m1', { tags: 'new1, new2' });
+    expect(db.getMemory('m1')!.tags).toBe('new1, new2');
+  });
+
+  it('clears tags with null', () => {
+    db.updateMemory('m1', { tags: null });
+    expect(db.getMemory('m1')!.tags).toBeNull();
+  });
+
+  it('updates pinned', () => {
+    db.updateMemory('m1', { pinned: true });
+    expect(db.getMemory('m1')!.pinned).toBe(1);
+    db.updateMemory('m1', { pinned: false });
+    expect(db.getMemory('m1')!.pinned).toBe(0);
+  });
+
+  it('sets load_with', () => {
+    db.updateMemory('m1', { load_with: 'abc,def' });
+    expect(db.getMemory('m1')!.load_with).toBe('abc,def');
+  });
+
+  it('clears load_with with null', () => {
+    db.updateMemory('m1', { load_with: 'abc' });
+    db.updateMemory('m1', { load_with: null });
+    expect(db.getMemory('m1')!.load_with).toBeNull();
+  });
+
+  it('leaves unmentioned fields unchanged', () => {
+    db.updateMemory('m1', { text: 'changed' });
+    const row = db.getMemory('m1')!;
+    expect(row.category).toBe('gotcha');
+    expect(row.tags).toBe('tag1, tag2');
+    expect(row.file_path).toBe('/a/b.ts');
+  });
+
+  it('no-op when no fields provided', () => {
+    db.updateMemory('m1', {});
+    expect(db.getMemory('m1')!.text).toBe('original text');
+  });
+});
+
+describe('load_with on insertMemory', () => {
+  let db: MemoryDb;
+  let dir: string;
+
+  beforeEach(() => ({ db, dir } = createTestDb()));
+
+  afterEach(() => {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('stores and retrieves load_with', () => {
+    db.insertMemory('m1', 'fact one', 'gotcha', null, null, null, false, null, 'm2,m3');
+    expect(db.getMemory('m1')!.load_with).toBe('m2,m3');
+  });
+
+  it('defaults load_with to null', () => {
+    db.insertMemory('m1', 'fact one', 'gotcha');
+    expect(db.getMemory('m1')!.load_with).toBeNull();
+  });
+});
+
 describe('repo relationships', () => {
   let db: MemoryDb;
   let dir: string;

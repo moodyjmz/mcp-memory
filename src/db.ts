@@ -17,8 +17,18 @@ export interface RepoRelationship {
   created_at: string;
 }
 
+export interface MemoryUpdateFields {
+  text?: string;
+  category?: MemoryCategory;
+  file_path?: string | null;
+  tags?: string | null;
+  pinned?: boolean;
+  load_with?: string | null;
+}
+
 export interface MemoryDb {
-  insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned?: boolean, tags?: string | null): void;
+  insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned?: boolean, tags?: string | null, load_with?: string | null): void;
+  updateMemory(id: string, fields: MemoryUpdateFields): void;
   pinMemory(id: string): void;
   unpinMemory(id: string): void;
   deleteMemory(id: string): void;
@@ -79,13 +89,32 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   if (!columns.some(c => c.name === 'tags')) {
     db.exec('ALTER TABLE memories ADD COLUMN tags TEXT');
   }
+  if (!columns.some(c => c.name === 'load_with')) {
+    db.exec('ALTER TABLE memories ADD COLUMN load_with TEXT');
+  }
 
   return {
-    insertMemory(id, text, category, file_path, git_sha, project, pinned = false, tags = null) {
+    insertMemory(id, text, category, file_path, git_sha, project, pinned = false, tags = null, load_with = null) {
       db.prepare(`
-        INSERT OR REPLACE INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned, tags)
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
-      `).run(id, text, category, file_path ?? null, git_sha ?? null, project ?? null, new Date().toISOString(), pinned ? 1 : 0, tags ?? null);
+        INSERT OR REPLACE INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned, tags, load_with)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+      `).run(id, text, category, file_path ?? null, git_sha ?? null, project ?? null, new Date().toISOString(), pinned ? 1 : 0, tags ?? null, load_with ?? null);
+    },
+
+    updateMemory(id, fields) {
+      const setParts: string[] = [];
+      const params: unknown[] = [];
+
+      if (fields.text !== undefined) { setParts.push('text = ?'); params.push(fields.text); }
+      if (fields.category !== undefined) { setParts.push('category = ?'); params.push(fields.category); }
+      if ('file_path' in fields) { setParts.push('file_path = ?'); params.push(fields.file_path ?? null); }
+      if ('tags' in fields) { setParts.push('tags = ?'); params.push(fields.tags ?? null); }
+      if (fields.pinned !== undefined) { setParts.push('pinned = ?'); params.push(fields.pinned ? 1 : 0); }
+      if ('load_with' in fields) { setParts.push('load_with = ?'); params.push(fields.load_with ?? null); }
+
+      if (setParts.length === 0) return;
+      params.push(id);
+      db.prepare(`UPDATE memories SET ${setParts.join(', ')} WHERE id = ?`).run(...params);
     },
 
     pinMemory(id) {
