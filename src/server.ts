@@ -35,8 +35,10 @@ function getGitRemote(file_path: string): string | null {
     const absPath = path.isAbsolute(file_path) ? file_path : path.resolve(file_path);
     const cwd = path.dirname(absPath);
     const url = execSync('git remote get-url origin', { cwd, encoding: 'utf8', timeout: 5000 }).trim();
-    // Normalise: strip .git suffix, convert SSH to a consistent format
-    return url.replace(/\.git$/, '').replace(/^git@([^:]+):/, 'https://$1/');
+    // Normalise: strip .git suffix, convert SSH to HTTPS form, strip fragments/query strings
+    const normalized = url.replace(/\.git$/, '').replace(/^git@([^:]+):/, 'https://$1/');
+    // Strip fragments and query strings so a crafted remote can't spoof another project's ID
+    return normalized.split('?')[0].split('#')[0];
   } catch {
     return null;
   }
