@@ -18,26 +18,40 @@ claude mcp add memory -s user "$NODE_BIN" "$SERVER_PATH"
 echo "==> Configuring global CLAUDE.md..."
 mkdir -p "$HOME/.claude"
 
-# Only append if not already present
-if [ -f "$CLAUDE_MD" ] && grep -q "$MARKER" "$CLAUDE_MD"; then
-  echo "    Memory instructions already in $CLAUDE_MD — skipping."
-else
-  cat >> "$CLAUDE_MD" << 'BLOCK'
-
+NEW_BLOCK='
 <!-- claude-memory-mcp -->
 ## Codebase Memory (MCP)
 
-Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_query`, `memory_list`, `memory_forget`, `repo_link`, `repo_unlink`, `repo_map`. Project is auto-detected from git root.
+Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_update`, `memory_query`, `memory_graph`, `memory_list`, `memory_forget`, `repo_link`, `repo_unlink`, `repo_map`, `memory_project_summary`. Project is auto-detected from git root.
 
-**Session start (MANDATORY):** On SessionStart hook, call `memory_project_summary` (tell user "Loading project memory...") BEFORE responding. Use the project from the hook message, or auto-detect from file_path.
+**Session start (MANDATORY):** On SessionStart hook, call `memory_project_summary` (tell user "Loading project memory...") BEFORE responding. Use the project from the hook message, or auto-detect from file_path. For unfamiliar projects also call `memory_graph` to get a scannable overview of all stored memories before querying.
 
 **When to store:** non-obvious architecture/conventions/gotchas, user corrections, cross-repo relationships (`repo_link`), and key learnings before context compaction. Check `repo_map` before cross-repo assumptions. Check `memory_query` before exploring unfamiliar code.
 
 **How to store:** Silently, with a one-liner announcement (e.g. "Storing: LESS overrides needed for escaped string interpolation"). Always include a `tags` array that adds NEW search surface — don't repeat words from the text (already embedded). Use synonyms and related terms. Example: text "Rate limiter uses sliding window with Redis" → `tags: ["throttling", "API", "backpressure", "quota", "429"]`.
 
+**Updating memories:** Use `memory_update` to amend existing memories — add tags, set load_with, fix text — without deleting and re-creating. Use `load_with` to couple two memories that are only useful together; set it on both so they surface together.
+
 **Pinning:** Use `pinned: true` only when the user explicitly asks to remember something permanently.
-<!-- /claude-memory-mcp -->
-BLOCK
+<!-- /claude-memory-mcp -->'
+
+if [ -f "$CLAUDE_MD" ] && grep -q "$MARKER" "$CLAUDE_MD"; then
+  # Replace existing block (handles upgrades — existing users get updated instructions)
+  printf '%s' "$NEW_BLOCK" | python3 -c "
+import re, sys
+new_block = sys.stdin.read()
+content = open(sys.argv[1]).read()
+updated = re.sub(
+    r'\n<!-- claude-memory-mcp -->.*?<!-- /claude-memory-mcp -->',
+    new_block,
+    content,
+    flags=re.DOTALL
+)
+open(sys.argv[1], 'w').write(updated)
+" "$CLAUDE_MD"
+  echo "    Updated memory instructions in $CLAUDE_MD"
+else
+  echo "$NEW_BLOCK" >> "$CLAUDE_MD"
   echo "    Added memory instructions to $CLAUDE_MD"
 fi
 
@@ -73,7 +87,9 @@ const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
 // --- Permissions ---
 const memoryTools = [
   'mcp__memory__memory_store',
+  'mcp__memory__memory_update',
   'mcp__memory__memory_query',
+  'mcp__memory__memory_graph',
   'mcp__memory__memory_list',
   'mcp__memory__memory_forget',
   'mcp__memory__memory_project_summary',
