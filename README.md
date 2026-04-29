@@ -119,7 +119,10 @@ npm run build       # Compile TypeScript to dist/
 npm run dev         # Watch mode
 npm test            # Run tests (vitest)
 npm run test:watch  # Watch mode tests
+npm run release     # Cut a new release (bumps version, generates changelog, tags, pushes, creates GitHub Release)
 ```
+
+Releases use [release-it](https://github.com/release-it/release-it) with conventional-changelog. Commit messages following the `feat:`, `fix:`, `docs:` etc. convention are automatically grouped into the `CHANGELOG.md` and the GitHub Release notes. Run `npm run release` from `main` and it will prompt for the version bump type.
 
 ## How it works
 
