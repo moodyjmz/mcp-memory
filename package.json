@@ -10,18 +10,21 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "setup": "./setup.sh"
+    "setup": "./setup.sh",
+    "release": "release-it"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
     "@huggingface/transformers": "^3.8.1",
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^12.8.0",
     "onnxruntime-node": "^1.21.0",
     "vectra": "^0.12.3"
   },
   "devDependencies": {
+    "@release-it/conventional-changelog": "^11.0.0",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
+    "release-it": "^20.0.1",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }

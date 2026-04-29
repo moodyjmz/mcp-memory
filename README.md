@@ -119,7 +119,12 @@ npm run build       # Compile TypeScript to dist/
 npm run dev         # Watch mode
 npm test            # Run tests (vitest)
 npm run test:watch  # Watch mode tests
+npm run release     # Cut a new release (bumps version, generates changelog, tags, pushes, creates GitHub Release)
 ```
+
+Releases use [release-it](https://github.com/release-it/release-it) with conventional-changelog. Commit messages following the `feat:`, `fix:`, `docs:` etc. convention are automatically grouped into the `CHANGELOG.md` and the GitHub Release notes.
+
+Releases are cut automatically by the `release.yml` GitHub Actions workflow on every push to `main` — no manual step needed. `feat:` commits bump the minor version, `fix:` bumps patch, and `BREAKING CHANGE` bumps major. Pushes with only `docs:`/`chore:` commits are skipped. To cut a release manually instead, run `npm run release` from `main`.
 
 ## How it works
 
