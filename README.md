@@ -112,6 +112,38 @@ claude mcp add memory -s user $(which node) /path/to/claude-memory/dist/server.j
 claude mcp add memory $(which node) /path/to/claude-memory/dist/server.js
 ```
 
+## Usage
+
+After `npm run setup`, Claude will use memory automatically. The session hooks remind it to load context at the start of each conversation and to persist findings before the session ends or the context compacts. No prompting needed for the basics.
+
+### Permissions
+
+The setup script adds all memory tools to the `allow` list in `~/.claude/settings.json` so Claude can store and query without interrupting you for approval. If you skipped `setup.sh`, add them manually — see the [Claude Code Hooks](#claude-code-hooks) section.
+
+### Let Claude store things as it goes
+
+When Claude figures out something non-obvious mid-session — a gotcha, an architectural constraint, a cross-repo dependency — tell it to store it:
+
+> "Remember that"  
+> "Store that as a gotcha"  
+> "Save the fact that X so you know next time"
+
+Claude will call `memory_store` with an appropriate category and tags.
+
+### End-of-session retro
+
+At the end of a coding session, ask Claude to reflect before you close:
+
+> "Before we finish — what did you learn today that's worth remembering?"
+
+Claude will surface the key facts from the session and store any that aren't already in memory. This is especially useful after debugging sessions, architecture discussions, or the first time you explore an unfamiliar part of a codebase.
+
+### What's worth storing
+
+Good candidates: architecture decisions and their rationale, non-obvious conventions, gotchas that wasted time, cross-repo relationships, environment quirks, and your working preferences.
+
+Not worth storing: things derivable from reading the code, git history, in-progress task state, or anything already in a README or doc file.
+
 ## Development
 
 ```bash
