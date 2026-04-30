@@ -122,13 +122,11 @@ The setup script adds all memory tools to the `allow` list in `~/.claude/setting
 
 ### Let Claude store things as it goes
 
-When Claude figures out something non-obvious mid-session — a gotcha, an architectural constraint, a cross-repo dependency — tell it to store it:
+Claude will typically store non-obvious facts as it discovers them — gotchas, architectural constraints, cross-repo dependencies. If you notice it hasn't, a nudge is enough:
 
 > "Remember that"  
 > "Store that as a gotcha"  
 > "Save the fact that X so you know next time"
-
-Claude will call `memory_store` with an appropriate category and tags.
 
 ### End-of-session retro
 
