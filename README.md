@@ -136,6 +136,8 @@ At the end of a coding session, ask Claude to reflect before you close:
 
 Claude will surface the key facts from the session and store any that aren't already in memory. This is especially useful after debugging sessions, architecture discussions, or the first time you explore an unfamiliar part of a codebase.
 
+It's also worth doing after a change of direction. A retro can capture not just what you built but why you didn't go the other way — that reasoning is hard to reconstruct from git history and easy to repeat as a mistake.
+
 ### What's worth storing
 
 Good candidates: architecture decisions and their rationale, non-obvious conventions, gotchas that wasted time, cross-repo relationships, environment quirks, and your working preferences.
