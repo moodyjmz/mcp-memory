@@ -112,6 +112,38 @@ claude mcp add memory -s user $(which node) /path/to/claude-memory/dist/server.j
 claude mcp add memory $(which node) /path/to/claude-memory/dist/server.js
 ```
 
+## Usage
+
+After `npm run setup`, Claude will use memory automatically. The session hooks remind it to load context at the start of each conversation and to persist findings before the session ends or the context compacts. No prompting needed for the basics.
+
+### Permissions
+
+The setup script adds all memory tools to the `allow` list in `~/.claude/settings.json` so Claude can store and query without interrupting you for approval. If you skipped `setup.sh`, add them manually — see the [Claude Code Hooks](#claude-code-hooks) section.
+
+### Let Claude store things as it goes
+
+Claude will typically store non-obvious facts as it discovers them — gotchas, architectural constraints, cross-repo dependencies. If you notice it hasn't, a nudge is enough:
+
+> "Remember that"  
+> "Store that as a gotcha"  
+> "Save the fact that X so you know next time"
+
+### End-of-session retro
+
+At the end of a coding session, ask Claude to reflect before you close:
+
+> "Before we finish — what did you learn today that's worth remembering?"
+
+Claude will surface the key facts from the session and store any that aren't already in memory. This is especially useful after debugging sessions, architecture discussions, or the first time you explore an unfamiliar part of a codebase.
+
+It's also worth doing after a change of direction. A retro can capture not just what you built but why you didn't go the other way — that reasoning is hard to reconstruct from git history and easy to repeat as a mistake.
+
+### What's worth storing
+
+Good candidates: architecture decisions and their rationale, non-obvious conventions, gotchas that wasted time, cross-repo relationships, environment quirks, and your working preferences.
+
+Not worth storing: things derivable from reading the code, git history, in-progress task state, or anything already in a README or doc file.
+
 ## Development
 
 ```bash
