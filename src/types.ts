@@ -53,5 +53,5 @@ export interface EvictionConfig {
 }
 
 export const DEFAULT_EVICTION_CONFIG: EvictionConfig = {
-  maxMemories: parseInt(process.env.MEMORY_MAX_COUNT || '500', 10),
+  maxMemories: parseInt(process.env.MEMORY_MAX_COUNT || '2000', 10),
 };

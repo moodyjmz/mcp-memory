@@ -80,7 +80,7 @@ Only populated when the results have tags and a project is known (via `project` 
 
 Memories are automatically evicted when the count exceeds `maxMemories` (default 500). Least-recently-accessed memories are removed first. **Pinned memories are never evicted** — use `pinned: true` on `memory_store` for permanent facts and user preferences. Configure via environment variable:
 
-- `MEMORY_MAX_COUNT` — max stored memories (default 500)
+- `MEMORY_MAX_COUNT` — max stored memories (default 2000)
 
 ### Project Scoping
 
