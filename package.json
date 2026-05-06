@@ -1,6 +1,6 @@
 {
   "name": "claude-memory-mcp",
-  "version": "2.1.3",
+  "version": "2.2.0",
   "description": "MCP memory server for Claude Code — persistent, searchable codebase knowledge",
   "type": "module",
   "main": "dist/server.js",
