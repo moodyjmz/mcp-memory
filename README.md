@@ -1,5 +1,10 @@
 # claude-memory-mcp
 
+[![CI](https://github.com/moodyjmz/mcp-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/moodyjmz/mcp-memory/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/moodyjmz/mcp-memory/graph/badge.svg)](https://codecov.io/gh/moodyjmz/mcp-memory)
+[![npm](https://img.shields.io/npm/v/claude-memory-mcp)](https://www.npmjs.com/package/claude-memory-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A local MCP (Model Context Protocol) server that gives Claude Code persistent, searchable memory across conversations. Stores facts about codebases — architecture, conventions, gotchas, decisions, and preferences — using semantic embeddings for retrieval and git-based staleness detection.
 
 ## Architecture
@@ -31,7 +36,7 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 | `repo_link` | Record a cross-repo relationship (provides, consumes, depends_on, builds_from, extends). |
 | `repo_unlink` | Remove a cross-repo relationship by ID. |
 | `repo_map` | Show all known cross-repo relationships, optionally filtered by project. |
-| `memory_project_summary` | Lightweight project overview for session start: category counts, pinned memories, repo relationships, and 5 most recently accessed memories (120-char excerpts — full text via `memory_query`). |
+| `memory_project_summary` | Lightweight project overview for session start: category counts, pinned memories, repo relationships, `recently_useful` (top 5 by last access — what was helpful before), and `recently_added` (top 5 by creation date — what's new). Full text via `memory_query`. |
 
 ### Categories
 
@@ -78,10 +83,9 @@ Only populated when the results have tags and a project is known (via `project` 
 
 ### Eviction
 
-Memories are automatically evicted when the count exceeds `maxMemories` (default 500). Least-recently-accessed memories are removed first. **Pinned memories are never evicted** — use `pinned: true` on `memory_store` for permanent facts and user preferences. Configure via environment variables:
+Memories are automatically evicted when the count exceeds `maxMemories` (default 500). Least-recently-accessed memories are removed first. **Pinned memories are never evicted** — use `pinned: true` on `memory_store` for permanent facts and user preferences. Configure via environment variable:
 
-- `MEMORY_MAX_COUNT` — max stored memories (default 500)
-- `MEMORY_MAX_AGE_DAYS` — max age in days (default 90)
+- `MEMORY_MAX_COUNT` — max stored memories (default 2000)
 
 ### Project Scoping
 
@@ -128,15 +132,27 @@ Claude will typically store non-obvious facts as it discovers them — gotchas, 
 > "Store that as a gotcha"  
 > "Save the fact that X so you know next time"
 
+### Inline updates
+
+Claude updates memories as it works — no prompting needed. When it reads a file or sees output that contradicts or refines a stored memory, it will flag it in one sentence and offer to update or forget the memory before continuing:
+
+> "That doesn't match my stored memory about X — want me to update it?"
+
+This is the primary mechanism. Most memory hygiene happens here, at the moment the discrepancy is visible and the context is fresh.
+
 ### End-of-session retro
 
-At the end of a coding session, ask Claude to reflect before you close:
+At natural task boundaries — when you confirm something works, create a PR, or shift to a new topic — Claude will check whether there are unstored learnings and ask:
+
+> "Worth a quick retro before we move on?"
+
+Say yes for a brief capture of anything not already stored. Say no to skip. The session-end hook is a backstop: if no retro has been offered yet, Claude will ask once more as the session closes.
+
+You can also trigger a retro explicitly any time:
 
 > "Before we finish — what did you learn today that's worth remembering?"
 
-Claude will surface the key facts from the session and store any that aren't already in memory. This is especially useful after debugging sessions, architecture discussions, or the first time you explore an unfamiliar part of a codebase.
-
-It's also worth doing after a change of direction. A retro can capture not just what you built but why you didn't go the other way — that reasoning is hard to reconstruct from git history and easy to repeat as a mistake.
+It's especially useful after debugging sessions, architecture discussions, or a change of direction — capturing not just what you built but why you didn't go the other way. That reasoning is hard to reconstruct from git history.
 
 ### What's worth storing
 

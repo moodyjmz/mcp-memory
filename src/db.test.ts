@@ -91,7 +91,7 @@ describe('db', () => {
     // Access 'new' so it's least evictable
     db.updateLastAccessed(['new']);
 
-    const ids = db.getEvictableIds({ maxMemories: 1, maxAgeDays: 90 });
+    const ids = db.getEvictableIds({ maxMemories: 1 });
     // Should evict 2 (3 - 1 = 2), oldest/least-accessed first
     expect(ids).toHaveLength(2);
     // 'old' and 'mid' have no last_accessed, so sort by created_at ASC
@@ -102,7 +102,7 @@ describe('db', () => {
 
   it('returns no evictable IDs when under limit', () => {
     db.insertMemory('m1', 'one', 'gotcha');
-    const ids = db.getEvictableIds({ maxMemories: 10, maxAgeDays: 90 });
+    const ids = db.getEvictableIds({ maxMemories: 10 });
     expect(ids).toHaveLength(0);
   });
 
@@ -142,7 +142,7 @@ describe('db', () => {
     db.insertMemory('normal1', 'temporary fact', 'gotcha');
     db.insertMemory('normal2', 'another temp', 'gotcha');
 
-    const ids = db.getEvictableIds({ maxMemories: 1, maxAgeDays: 90 });
+    const ids = db.getEvictableIds({ maxMemories: 1 });
     expect(ids).not.toContain('pinned1');
     expect(ids).toHaveLength(2); // both unpinned are candidates
   });

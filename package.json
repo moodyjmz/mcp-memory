@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "dev": "tsc --watch",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "setup": "./setup.sh",
     "release": "release-it"
@@ -24,6 +25,7 @@
     "@release-it/conventional-changelog": "^11.0.0",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^3.2.4",
     "release-it": "^20.0.1",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"

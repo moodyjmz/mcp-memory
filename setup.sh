@@ -26,9 +26,13 @@ cat > "$BLOCK_FILE" <<'BLOCK'
 
 Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_update`, `memory_query`, `memory_graph`, `memory_list`, `memory_forget`, `repo_link`, `repo_unlink`, `repo_map`, `memory_project_summary`. Project is auto-detected from git root.
 
-**Session start (MANDATORY):** On SessionStart hook, call `memory_project_summary` (tell user "Loading project memory...") BEFORE responding. Use the project from the hook message, or auto-detect from file_path. For unfamiliar projects also call `memory_graph` to get a scannable overview of all stored memories before querying.
+**Session start (MANDATORY):** On SessionStart hook, call `memory_project_summary` (tell user "Loading project memory...") BEFORE responding. Use the project from the hook message, or auto-detect from file_path. The response includes `recently_useful` (memories accessed in past sessions) and `recently_added` (newest memories) — use both for context. For unfamiliar projects also call `memory_graph` to get a scannable overview of all stored memories before querying.
 
 **When to store:** non-obvious architecture/conventions/gotchas, user corrections, cross-repo relationships (`repo_link`), and key learnings before context compaction. Check `repo_map` before cross-repo assumptions. Check `memory_query` before exploring unfamiliar code.
+
+**Inline updates:** If you observe something — a file, command output, test result — that contradicts or refines a stored memory, flag it in one sentence and offer to `memory_update` or `memory_forget` before continuing. Don't wait for end of session.
+
+**Task retro:** When a meaningful unit of work completes (user confirms it works, PR created, conversation pivots) and you have unstored learnings, ask once: "Worth a quick retro before we move on?" Skip if nothing substantive changed or if you've already updated memories inline this session.
 
 **How to store:** Silently, with a one-liner announcement (e.g. "Storing: LESS overrides needed for escaped string interpolation"). Always include a `tags` array that adds NEW search surface — don't repeat words from the text (already embedded). Use synonyms and related terms. Example: text "Rate limiter uses sliding window with Redis" → `tags: ["throttling", "API", "backpressure", "quota", "429"]`.
 
