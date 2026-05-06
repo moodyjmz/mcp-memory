@@ -128,15 +128,27 @@ Claude will typically store non-obvious facts as it discovers them — gotchas, 
 > "Store that as a gotcha"  
 > "Save the fact that X so you know next time"
 
+### Inline updates
+
+Claude updates memories as it works — no prompting needed. When it reads a file or sees output that contradicts or refines a stored memory, it will flag it in one sentence and offer to update or forget the memory before continuing:
+
+> "That doesn't match my stored memory about X — want me to update it?"
+
+This is the primary mechanism. Most memory hygiene happens here, at the moment the discrepancy is visible and the context is fresh.
+
 ### End-of-session retro
 
-At the end of a coding session, ask Claude to reflect before you close:
+At natural task boundaries — when you confirm something works, create a PR, or shift to a new topic — Claude will check whether there are unstored learnings and ask:
+
+> "Worth a quick retro before we move on?"
+
+Say yes for a brief capture of anything not already stored. Say no to skip. The session-end hook is a backstop: if no retro has been offered yet, Claude will ask once more as the session closes.
+
+You can also trigger a retro explicitly any time:
 
 > "Before we finish — what did you learn today that's worth remembering?"
 
-Claude will surface the key facts from the session and store any that aren't already in memory. This is especially useful after debugging sessions, architecture discussions, or the first time you explore an unfamiliar part of a codebase.
-
-It's also worth doing after a change of direction. A retro can capture not just what you built but why you didn't go the other way — that reasoning is hard to reconstruct from git history and easy to repeat as a mistake.
+It's especially useful after debugging sessions, architecture discussions, or a change of direction — capturing not just what you built but why you didn't go the other way. That reasoning is hard to reconstruct from git history.
 
 ### What's worth storing
 

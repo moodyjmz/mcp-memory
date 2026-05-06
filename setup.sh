@@ -30,6 +30,10 @@ Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_up
 
 **When to store:** non-obvious architecture/conventions/gotchas, user corrections, cross-repo relationships (`repo_link`), and key learnings before context compaction. Check `repo_map` before cross-repo assumptions. Check `memory_query` before exploring unfamiliar code.
 
+**Inline updates:** If you observe something — a file, command output, test result — that contradicts or refines a stored memory, flag it in one sentence and offer to `memory_update` or `memory_forget` before continuing. Don't wait for end of session.
+
+**Task retro:** When a meaningful unit of work completes (user confirms it works, PR created, conversation pivots) and you have unstored learnings, ask once: "Worth a quick retro before we move on?" Skip if nothing substantive changed or if you've already updated memories inline this session.
+
 **How to store:** Silently, with a one-liner announcement (e.g. "Storing: LESS overrides needed for escaped string interpolation"). Always include a `tags` array that adds NEW search surface — don't repeat words from the text (already embedded). Use synonyms and related terms. Example: text "Rate limiter uses sliding window with Redis" → `tags: ["throttling", "API", "backpressure", "quota", "429"]`.
 
 **Updating memories:** Use `memory_update` to amend existing memories — add tags, set load_with, fix text — without deleting and re-creating. Use `load_with` to couple two memories that are only useful together; set it on both so they surface together.
