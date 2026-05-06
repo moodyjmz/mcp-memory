@@ -14,11 +14,22 @@ export function checkStaleness(file_path: string | null | undefined, git_sha: st
   }
 
   try {
-    // Relative paths are resolved against cwd (the project the session is in)
-    const absPath = path.isAbsolute(file_path) ? file_path : path.resolve(process.cwd(), file_path);
+    let absPath: string;
+    if (path.isAbsolute(file_path)) {
+      absPath = file_path;
+    } else {
+      // file_path is stored relative to git root — find it from cwd first
+      const gitRoot = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+      });
+      const base = (!gitRoot.error && gitRoot.status === 0)
+        ? gitRoot.stdout.trim()
+        : process.cwd();
+      absPath = path.resolve(base, file_path);
+    }
 
     if (!fs.existsSync(absPath)) {
-      // Relative path that doesn't resolve here — not necessarily deleted, just different repo
+      // Relative path that doesn't resolve — different repo or not checked out here
       if (!path.isAbsolute(file_path)) {
         return { stale: false };
       }
