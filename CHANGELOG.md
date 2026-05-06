@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/moodyjmz/mcp-memory/compare/v2.2.0...v2.2.1) (2026-05-06)
+
+
+### Bug Fixes
+
+* :green_heart: bump codecov-action to v5 and use token: parameter ([17c3182](https://github.com/moodyjmz/mcp-memory/commit/17c31822492490a8cda008e751d9990525ef3324))
+
 # [2.2.0](https://github.com/moodyjmz/mcp-memory/compare/v2.1.3...v2.2.0) (2026-05-06)
 
 
