@@ -50,10 +50,8 @@ export interface QueryFactResult {
 
 export interface EvictionConfig {
   maxMemories: number;
-  maxAgeDays: number;
 }
 
 export const DEFAULT_EVICTION_CONFIG: EvictionConfig = {
   maxMemories: parseInt(process.env.MEMORY_MAX_COUNT || '500', 10),
-  maxAgeDays: parseInt(process.env.MEMORY_MAX_AGE_DAYS || '90', 10),
 };
