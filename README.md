@@ -1,5 +1,10 @@
 # claude-memory-mcp
 
+[![CI](https://github.com/moodyjmz/mcp-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/moodyjmz/mcp-memory/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/moodyjmz/mcp-memory/graph/badge.svg)](https://codecov.io/gh/moodyjmz/mcp-memory)
+[![npm](https://img.shields.io/npm/v/claude-memory-mcp)](https://www.npmjs.com/package/claude-memory-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A local MCP (Model Context Protocol) server that gives Claude Code persistent, searchable memory across conversations. Stores facts about codebases — architecture, conventions, gotchas, decisions, and preferences — using semantic embeddings for retrieval and git-based staleness detection.
 
 ## Architecture

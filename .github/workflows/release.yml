@@ -18,9 +18,16 @@ jobs:
         with:
           node-version: 20
 
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
 
-      - run: npm test
+      - run: npm run test:coverage
+
+      - uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Configure git
         run: |
