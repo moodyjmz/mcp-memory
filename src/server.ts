@@ -484,7 +484,7 @@ server.registerTool('repo_map', {
 // ─── memory_project_summary ──────────────────────────────────────────────────
 
 server.registerTool('memory_project_summary', {
-  description: 'Lightweight project overview for session start: category counts, pinned memories, repo relationships, and recently accessed memories. Does NOT return all memories.',
+  description: 'Lightweight project overview for session start: category counts, pinned memories, repo relationships, recently useful memories (by last access), and recently added memories (by creation date). Does NOT return all memories.',
   inputSchema: {
     project: z.string().optional().describe('Project identifier. Auto-detected from file_path if not given.'),
     file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given.'),
@@ -515,19 +515,20 @@ server.registerTool('memory_project_summary', {
     .filter(r => r.pinned === 1)
     .map(r => ({ id: r.id, text: r.text, category: r.category }));
 
-  // 5 most recently accessed memories (excerpts — full text via memory_query)
-  const recent = [...allMemories]
-    .sort((a, b) => {
-      const aDate = a.last_accessed || a.created_at;
-      const bDate = b.last_accessed || b.created_at;
-      return bDate.localeCompare(aDate);
-    })
+  const excerpt = (text: string) => text.length > 120 ? text.slice(0, 117) + '...' : text;
+
+  // Recently useful: memories that have been accessed, ordered by last access
+  const recentlyUseful = [...allMemories]
+    .filter(r => r.last_accessed)
+    .sort((a, b) => b.last_accessed!.localeCompare(a.last_accessed!))
     .slice(0, 5)
-    .map(r => ({
-      id: r.id,
-      text: r.text.length > 120 ? r.text.slice(0, 117) + '...' : r.text,
-      category: r.category,
-    }));
+    .map(r => ({ id: r.id, text: excerpt(r.text), category: r.category }));
+
+  // Recently added: newest memories by creation date
+  const recentlyAdded = [...allMemories]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 5)
+    .map(r => ({ id: r.id, text: excerpt(r.text), category: r.category }));
 
   // Repo relationships
   const relationships = db.getRepoMap(resolvedProject);
@@ -540,7 +541,8 @@ server.registerTool('memory_project_summary', {
         total_memories: allMemories.length,
         category_counts: categoryCounts,
         pinned_memories: pinned,
-        recent_memories: recent,
+        recently_useful: recentlyUseful,
+        recently_added: recentlyAdded,
         repo_relationships: relationships,
       }, null, 2),
     }],

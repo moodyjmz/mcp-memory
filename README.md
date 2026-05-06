@@ -31,7 +31,7 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 | `repo_link` | Record a cross-repo relationship (provides, consumes, depends_on, builds_from, extends). |
 | `repo_unlink` | Remove a cross-repo relationship by ID. |
 | `repo_map` | Show all known cross-repo relationships, optionally filtered by project. |
-| `memory_project_summary` | Lightweight project overview for session start: category counts, pinned memories, repo relationships, and 5 most recently accessed memories (120-char excerpts — full text via `memory_query`). |
+| `memory_project_summary` | Lightweight project overview for session start: category counts, pinned memories, repo relationships, `recently_useful` (top 5 by last access — what was helpful before), and `recently_added` (top 5 by creation date — what's new). Full text via `memory_query`. |
 
 ### Categories
 
