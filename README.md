@@ -83,7 +83,7 @@ Only populated when the results have tags and a project is known (via `project` 
 
 ### Eviction
 
-Memories are automatically evicted when the count exceeds `maxMemories` (default 500). Least-recently-accessed memories are removed first. **Pinned memories are never evicted** — use `pinned: true` on `memory_store` for permanent facts and user preferences. Configure via environment variable:
+Memories are automatically evicted when the count exceeds `maxMemories` (default 2000). Least-recently-accessed memories are removed first. **Pinned memories are never evicted** — use `pinned: true` on `memory_store` for permanent facts and user preferences. Configure via environment variable:
 
 - `MEMORY_MAX_COUNT` — max stored memories (default 2000)
 
@@ -163,11 +163,12 @@ Not worth storing: things derivable from reading the code, git history, in-progr
 ## Development
 
 ```bash
-npm run build       # Compile TypeScript to dist/
-npm run dev         # Watch mode
-npm test            # Run tests (vitest)
-npm run test:watch  # Watch mode tests
-npm run release     # Cut a new release (bumps version, generates changelog, tags, pushes, creates GitHub Release)
+npm run build           # Compile TypeScript to dist/
+npm run dev             # Watch mode
+npm test                # Run tests (vitest)
+npm run test:coverage   # Run tests with coverage report
+npm run test:watch      # Watch mode tests
+npm run release         # Cut a new release (bumps version, generates changelog, tags, pushes, creates GitHub Release)
 ```
 
 Releases use [release-it](https://github.com/release-it/release-it) with conventional-changelog. Commit messages following the `feat:`, `fix:`, `docs:` etc. convention are automatically grouped into the `CHANGELOG.md` and the GitHub Release notes.
@@ -279,7 +280,7 @@ Then add the hook config and memory tool permissions to `~/.claude/settings.json
 |------|-------|-------------|
 | `session-start.sh` | SessionStart | Detects project from git, reminds Claude to call `memory_project_summary` |
 | `pre-compact.sh` | PreCompact | Warns Claude to store learnings before context is compressed |
-| `session-end.sh` | SessionEnd | Reminds Claude to persist key findings before session closes |
+| `session-end.sh` | SessionEnd | If no retro has been offered yet this session, prompts Claude to ask the user before closing |
 
 All hooks output colour-coded console messages (cyan/red/yellow) for visibility.
 
