@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.5](https://github.com/moodyjmz/mcp-memory/compare/v2.2.4...v2.2.5) (2026-05-07)
+
+
+### Bug Fixes
+
+* :green_heart: explicit coverage dir, auto-detect lcov, fail loudly on upload error ([e619983](https://github.com/moodyjmz/mcp-memory/commit/e619983987c67f8d78c63812876f8d9d8b3d26d2))
+
 ## [2.2.4](https://github.com/moodyjmz/mcp-memory/compare/v2.2.3...v2.2.4) (2026-05-07)
 
 
