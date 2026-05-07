@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.2](https://github.com/moodyjmz/mcp-memory/compare/v2.2.1...v2.2.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* **deps:** Bump ip-address and express-rate-limit ([acfe24c](https://github.com/moodyjmz/mcp-memory/commit/acfe24cb7b2bf6eaf09dbd209a28468ecdb3579a))
+
 ## [2.2.1](https://github.com/moodyjmz/mcp-memory/compare/v2.2.0...v2.2.1) (2026-05-06)
 
 
