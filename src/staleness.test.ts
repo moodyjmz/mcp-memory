@@ -68,4 +68,34 @@ describe('staleness', () => {
     mockSpawnSync.mockImplementation(() => { throw new Error('spawn error'); });
     expect(checkStaleness('/some/file.ts', VALID_SHA)).toEqual({ stale: false });
   });
+
+  describe('relative paths', () => {
+    it('resolves relative path from git root and returns not stale', () => {
+      // First call: git rev-parse --show-toplevel
+      mockSpawnSync.mockReturnValueOnce({ stdout: '/repo/root\n', stderr: '', status: 0, error: undefined } as any);
+      // Second call: git log
+      mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: '', status: 0, error: undefined } as any);
+      expect(checkStaleness('src/file.ts', VALID_SHA)).toEqual({ stale: false });
+    });
+
+    it('resolves relative path from git root and returns stale', () => {
+      mockSpawnSync.mockReturnValueOnce({ stdout: '/repo/root\n', stderr: '', status: 0, error: undefined } as any);
+      mockSpawnSync.mockReturnValueOnce({ stdout: 'abc1234 fix thing', stderr: '', status: 0, error: undefined } as any);
+      expect(checkStaleness('src/file.ts', VALID_SHA)).toEqual({ stale: true, commits_since: 1 });
+    });
+
+    it('falls back to cwd when git root lookup fails', () => {
+      // First call: git rev-parse fails
+      mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: 'fatal: not a git repo', status: 128, error: undefined } as any);
+      // Second call: git log
+      mockSpawnSync.mockReturnValueOnce({ stdout: '', stderr: '', status: 0, error: undefined } as any);
+      expect(checkStaleness('src/file.ts', VALID_SHA)).toEqual({ stale: false });
+    });
+
+    it('returns not stale when relative path cannot be resolved', () => {
+      mockSpawnSync.mockReturnValueOnce({ stdout: '/repo/root\n', stderr: '', status: 0, error: undefined } as any);
+      mockExistsSync.mockReturnValue(false);
+      expect(checkStaleness('src/file.ts', VALID_SHA)).toEqual({ stale: false });
+    });
+  });
 });
