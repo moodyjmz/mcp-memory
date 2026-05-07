@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.4](https://github.com/moodyjmz/mcp-memory/compare/v2.2.3...v2.2.4) (2026-05-07)
+
+
+### Bug Fixes
+
+* **deps-dev:** Bump @types/node from 22.19.15 to 25.6.0 ([bd349d4](https://github.com/moodyjmz/mcp-memory/commit/bd349d4df3202ae6285bae9efcc5fadfaa913dc9))
+* **deps-dev:** Bump typescript from 5.9.3 to 6.0.3 ([7214eae](https://github.com/moodyjmz/mcp-memory/commit/7214eaed68fdf2480bcc20a5a1b407ef1cf05687))
+* **deps:** Bump axios from 1.15.0 to 1.16.0 ([12823e8](https://github.com/moodyjmz/mcp-memory/commit/12823e84e4a0f27ccf7281016abde6179f43ddad))
+* **deps:** Bump onnxruntime-node from 1.24.3 to 1.25.1 ([749821e](https://github.com/moodyjmz/mcp-memory/commit/749821e92b944beadc30c2e37fc40abc5f8859f8))
+
 ## [2.2.3](https://github.com/moodyjmz/mcp-memory/compare/v2.2.2...v2.2.3) (2026-05-07)
 
 
