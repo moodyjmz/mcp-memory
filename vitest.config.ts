@@ -9,7 +9,7 @@ export default defineConfig({
       reporter: ['text', 'lcov'],
       reportsDirectory: './coverage',
       include: ['src/**/*.ts'],
-      exclude: ['src/**/*.test.ts', 'src/test-helpers.ts', 'src/server.ts', 'src/embeddings.ts'],
+      exclude: ['src/**/*.test.ts', 'src/test-helpers.ts', 'src/server.ts', 'src/embeddings.ts', 'src/types.ts'],
     },
   },
 });
