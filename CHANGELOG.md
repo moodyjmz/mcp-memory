@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.3](https://github.com/moodyjmz/mcp-memory/compare/v2.2.2...v2.2.3) (2026-05-07)
+
+
+### Bug Fixes
+
+* **deps:** Bump hono from 4.12.14 to 4.12.18 ([77663bb](https://github.com/moodyjmz/mcp-memory/commit/77663bb282043606e8230e5a945564ac8093a9a7))
+
 ## [2.2.2](https://github.com/moodyjmz/mcp-memory/compare/v2.2.1...v2.2.2) (2026-05-07)
 
 
