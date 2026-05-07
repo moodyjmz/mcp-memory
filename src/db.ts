@@ -211,6 +211,8 @@ export function createMemoryDb(dbPath: string): MemoryDb {
 // Default singleton for production
 let _default: MemoryDb | null = null;
 
+// Singleton branch untestable without polluting production code with a reset hook
+/* v8 ignore next 5 */
 export function getDefaultDb(): MemoryDb {
   if (!_default) {
     _default = createMemoryDb(path.join(DEFAULT_DATA_DIR, 'memory.db'));

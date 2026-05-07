@@ -101,6 +101,8 @@ export function createMemoryIndex(
 // Default singleton for production
 let _default: MemoryIndex | null = null;
 
+// Singleton branch untestable without polluting production code with a reset hook
+/* v8 ignore next 5 */
 export function getDefaultIndex(): MemoryIndex {
   if (!_default) {
     _default = createMemoryIndex(path.join(DEFAULT_DATA_DIR, 'vector_index'));
