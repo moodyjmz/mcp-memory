@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { rmSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import path from 'path';
+import Database from 'better-sqlite3';
+import { createMemoryDb } from './db.js';
 import { createTestDb } from './test-helpers.js';
 import type { MemoryDb } from './db.js';
 
@@ -286,5 +290,40 @@ describe('repo relationships', () => {
   it('returns empty array when no relationships', () => {
     expect(db.getRepoMap()).toHaveLength(0);
     expect(db.getRepoMap('nonexistent')).toHaveLength(0);
+  });
+});
+
+describe('migrations', () => {
+  it('adds missing columns to an existing legacy database', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'claude-memory-migration-test-'));
+    const dbPath = path.join(dir, 'legacy.db');
+
+    // Create a minimal legacy schema without the migration columns
+    const raw = new Database(dbPath);
+    raw.exec(`
+      CREATE TABLE memories (
+        id TEXT PRIMARY KEY,
+        text TEXT NOT NULL,
+        category TEXT NOT NULL,
+        file_path TEXT,
+        git_sha TEXT,
+        project TEXT,
+        created_at TEXT NOT NULL
+      );
+    `);
+    raw.close();
+
+    // createMemoryDb should run migrations and add the missing columns
+    const db = createMemoryDb(dbPath);
+    const columns = (new Database(dbPath)).prepare('PRAGMA table_info(memories)').all() as { name: string }[];
+    const names = columns.map(c => c.name);
+
+    expect(names).toContain('last_accessed');
+    expect(names).toContain('pinned');
+    expect(names).toContain('tags');
+    expect(names).toContain('load_with');
+
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });
