@@ -19,7 +19,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.8.0",
     "onnxruntime-node": "^1.25.1",
-    "vectra": "^0.12.3"
+    "vectra": "^0.14.0"
   },
   "devDependencies": {
     "@release-it/conventional-changelog": "^11.0.0",
