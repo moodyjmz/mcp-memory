@@ -33,7 +33,7 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 | `memory_graph` | Compact table-of-contents of all project memories grouped by category, with 120-char excerpts, tags, and load_with. Use at session start to see everything that exists before querying. |
 | `memory_list` | List memories filtered by category and/or project. Returns full rows. |
 | `memory_forget` | Remove a memory by ID from both stores. |
-| `memory_clear_ephemerals` | Bulk-clear all session-scoped memories for a project. Project-scoped. Use at session end after reviewing which to promote. |
+| `memory_clear_ephemerals` | Bulk-clear all session-scoped memories for a project. Use at session end after reviewing which to promote. Accepts `file_path` to auto-detect project (mirrors `memory_store`). |
 | `repo_link` | Record a cross-repo relationship (provides, consumes, depends_on, builds_from, extends). |
 | `repo_unlink` | Remove a cross-repo relationship by ID. |
 | `repo_map` | Show all known cross-repo relationships, optionally filtered by project. |
@@ -86,7 +86,7 @@ Only populated when the results have tags and a project is known (via `project` 
 
 Use `ephemeral: true` on `memory_store` for session-scoped working state that shouldn't pollute long-term knowledge — current task spec, docker/infra topology, validated commands with git SHAs. Ephemerals:
 
-- Appear in `session_state` at the top of `memory_project_summary` with timestamps, so you can immediately see prior-session state and judge what to keep
+- Appear in `session_state` at the top of `memory_project_summary` with timestamps and `age_hours`, so you can immediately see prior-session state and judge what to keep
 - Are **never evicted** mid-session (excluded from the LRU eviction queue)
 - Survive context compaction inside a session
 - Are reviewed at session end: promote to long-term with `memory_update { ephemeral: false }` or bulk-clear with `memory_clear_ephemerals`
