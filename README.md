@@ -33,6 +33,7 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 | `memory_graph` | Compact table-of-contents of all project memories grouped by category, with 120-char excerpts, tags, and load_with. Use at session start to see everything that exists before querying. |
 | `memory_list` | List memories filtered by category and/or project. Returns full rows. |
 | `memory_forget` | Remove a memory by ID from both stores. |
+| `memory_clear_ephemerals` | Bulk-clear all session-scoped memories for a project. Project-scoped. Use at session end after reviewing which to promote. |
 | `repo_link` | Record a cross-repo relationship (provides, consumes, depends_on, builds_from, extends). |
 | `repo_unlink` | Remove a cross-repo relationship by ID. |
 | `repo_map` | Show all known cross-repo relationships, optionally filtered by project. |
@@ -80,6 +81,40 @@ Use `memory_update` to add `load_with` to existing memories when you discover co
 `memory_query` returns `{ results, also_relevant }`. The `also_relevant` array contains up to 3 memories that share tags with the main results but weren't semantically close enough to rank. These are often causally related facts with different vocabulary — the kind semantic search alone would miss. Full memory text is returned (not excerpts), so no follow-up call is needed.
 
 Only populated when the results have tags and a project is known (via `project` or `file_path`).
+
+### Ephemeral memory
+
+Use `ephemeral: true` on `memory_store` for session-scoped working state that shouldn't pollute long-term knowledge — current task spec, docker/infra topology, validated commands with git SHAs. Ephemerals:
+
+- Appear in `session_state` at the top of `memory_project_summary` with timestamps, so you can immediately see prior-session state and judge what to keep
+- Are **never evicted** mid-session (excluded from the LRU eviction queue)
+- Survive context compaction inside a session
+- Are reviewed at session end: promote to long-term with `memory_update { ephemeral: false }` or bulk-clear with `memory_clear_ephemerals`
+
+At session start, if stale ephemerals from a previous session are detected, Claude will surface them and ask whether to promote or clear.
+
+```json
+{
+  "text": "API service runs from eurooffice repo; DB mounts from /data/pg-vol in the infra-docker image",
+  "category": "architecture",
+  "ephemeral": true,
+  "tags": ["docker", "volumes", "infra"]
+}
+```
+
+#### Complex topology docs
+
+For multi-repo or docker setups too detailed to condense into a single memory, write a `.claude/<topic>.md` file in the project (e.g. `.claude/docker-topology.md`) and store an ephemeral memory pointing to it:
+
+```json
+{
+  "text": "Docker topology for eurooffice dev stack documented in .claude/docker-topology.md",
+  "category": "architecture",
+  "ephemeral": true
+}
+```
+
+The markdown file ships in PRs, survives session end, and lets you resurrect the exact setup immediately when a bug is raised weeks later — without reconstructing it from scratch.
 
 ### Eviction
 
@@ -250,6 +285,7 @@ Then add the hook config and memory tool permissions to `~/.claude/settings.json
       "mcp__memory__memory_graph",
       "mcp__memory__memory_list",
       "mcp__memory__memory_forget",
+      "mcp__memory__memory_clear_ephemerals",
       "mcp__memory__memory_project_summary",
       "mcp__memory__repo_link",
       "mcp__memory__repo_unlink",
