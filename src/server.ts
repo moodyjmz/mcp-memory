@@ -371,22 +371,39 @@ server.registerTool('memory_forget', {
 server.registerTool('memory_clear_ephemerals', {
   description: 'Clear all session-scoped (ephemeral) memories for a project. Use at session end after reviewing which to promote. Removes from both vector index and database.',
   inputSchema: {
-    project: z.string().describe('Project identifier — only ephemerals for this project are cleared'),
+    project: z.string().min(1).optional().describe('Project identifier — only ephemerals for this project are cleared'),
+    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given'),
   },
-}, async ({ project }) => {
+}, async ({ project, file_path }) => {
   const db = getDefaultDb();
   const index = getDefaultIndex();
 
-  const ids = db.clearEphemeralMemories(project);
+  const resolvedProject = project || (file_path ? getProjectId(file_path) : null);
+  if (!resolvedProject) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ error: 'Could not determine project. Provide project or file_path.' }, null, 2),
+      }],
+    };
+  }
 
+  // List IDs before any deletion so Vectra can be cleaned first
+  const rows = db.listEphemeralMemories(resolvedProject);
+  const ids = rows.map(r => r.id);
+
+  // Vectra first — SQLite records remain as fallback if Vectra fails partway
   for (const id of ids) {
     try { await index.deleteFact(id); } catch { /* already gone from index */ }
   }
 
+  // SQLite last — atomic via RETURNING in db
+  db.clearEphemeralMemories(resolvedProject);
+
   return {
     content: [{
       type: 'text' as const,
-      text: JSON.stringify({ cleared: ids.length, ids, project }, null, 2),
+      text: JSON.stringify({ cleared: ids.length, ids, project: resolvedProject }, null, 2),
     }],
   };
 });
@@ -534,7 +551,7 @@ server.registerTool('memory_project_summary', {
 
   const allMemories = db.listMemories(undefined, resolvedProject);
   const longTerm = allMemories.filter(r => r.ephemeral === 0);
-  const ephemerals = db.listEphemeralMemories(resolvedProject);
+  const ephemerals = allMemories.filter(r => r.ephemeral === 1);
 
   // Category counts (long-term only)
   const categoryCounts: Record<string, number> = {};
@@ -568,6 +585,7 @@ server.registerTool('memory_project_summary', {
     text: r.text,
     category: r.category,
     created_at: r.created_at,
+    age_hours: Math.round((Date.now() - new Date(r.created_at).getTime()) / 3600000),
     tags: r.tags ? r.tags.split(',').map(t => t.trim()) : null,
   }));
 

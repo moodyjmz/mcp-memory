@@ -201,15 +201,9 @@ export function createMemoryDb(dbPath: string): MemoryDb {
 
     clearEphemeralMemories(project) {
       const rows = db.prepare(
-        'SELECT id FROM memories WHERE ephemeral = 1 AND project = ?'
+        'DELETE FROM memories WHERE ephemeral = 1 AND project = ? RETURNING id'
       ).all(project) as { id: string }[];
-      const ids = rows.map(r => r.id);
-      if (ids.length > 0) {
-        db.prepare(
-          `DELETE FROM memories WHERE ephemeral = 1 AND project = ?`
-        ).run(project);
-      }
-      return ids;
+      return rows.map(r => r.id);
     },
 
     addRelationship(source, target, type, description, file_path) {
