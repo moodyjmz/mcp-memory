@@ -1,5 +1,19 @@
 # Changelog
 
+# [2.3.0](https://github.com/moodyjmz/mcp-memory/compare/v2.2.9...v2.3.0) (2026-05-25)
+
+
+### Bug Fixes
+
+* address advisor review — atomicity, delete order, and double-query in ephemeral ops ([3ab4f2a](https://github.com/moodyjmz/mcp-memory/commit/3ab4f2a279141771c42909a2cceeef652f23775a))
+
+
+### Features
+
+* add ephemeral flag to memories for session-scoped state ([1ac4f17](https://github.com/moodyjmz/mcp-memory/commit/1ac4f17bc330a98ad0b41ca9fb2562b97ee49d9d))
+* expose ephemeral flag in server tools and session_state in summary ([75a1a1d](https://github.com/moodyjmz/mcp-memory/commit/75a1a1d9b0ed77944c256bf5c63d34558d1c39d7))
+* improve hooks and docs for ephemeral session state ([2a091a8](https://github.com/moodyjmz/mcp-memory/commit/2a091a881a27ccd9cbb98f54208e1e4714d8fc54))
+
 ## [2.2.9](https://github.com/moodyjmz/mcp-memory/compare/v2.2.8...v2.2.9) (2026-05-07)
 
 ## [2.2.8](https://github.com/moodyjmz/mcp-memory/compare/v2.2.7...v2.2.8) (2026-05-07)
