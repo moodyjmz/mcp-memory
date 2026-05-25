@@ -75,6 +75,12 @@ describe('db', () => {
     expect(db.countMemories()).toBe(2);
   });
 
+  it('updateLastAccessed is a no-op for empty array', () => {
+    db.insertMemory('m1', 'one', 'gotcha');
+    db.updateLastAccessed([]);
+    expect(db.getMemory('m1')!.last_accessed).toBeNull();
+  });
+
   it('updates last_accessed timestamps', () => {
     db.insertMemory('m1', 'one', 'gotcha');
     db.insertMemory('m2', 'two', 'convention');
@@ -210,6 +216,21 @@ describe('updateMemory', () => {
     expect(row.category).toBe('gotcha');
     expect(row.tags).toBe('tag1, tag2');
     expect(row.file_path).toBe('/a/b.ts');
+  });
+
+  it('updates file_path', () => {
+    db.updateMemory('m1', { file_path: '/new/path.ts' });
+    expect(db.getMemory('m1')!.file_path).toBe('/new/path.ts');
+  });
+
+  it('clears file_path with null', () => {
+    db.updateMemory('m1', { file_path: null });
+    expect(db.getMemory('m1')!.file_path).toBeNull();
+  });
+
+  it('updates ephemeral to true', () => {
+    db.updateMemory('m1', { ephemeral: true });
+    expect(db.getMemory('m1')!.ephemeral).toBe(1);
   });
 
   it('no-op when no fields provided', () => {
