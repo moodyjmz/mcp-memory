@@ -24,11 +24,17 @@ cat > "$BLOCK_FILE" <<'BLOCK'
 <!-- claude-memory-mcp -->
 ## Codebase Memory (MCP)
 
-Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_update`, `memory_query`, `memory_graph`, `memory_list`, `memory_forget`, `repo_link`, `repo_unlink`, `repo_map`, `memory_project_summary`. Project is auto-detected from git root.
+Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_update`, `memory_query`, `memory_graph`, `memory_list`, `memory_forget`, `memory_clear_ephemerals`, `repo_link`, `repo_unlink`, `repo_map`, `memory_project_summary`. Project is auto-detected from git root.
 
-**Session start (MANDATORY):** On SessionStart hook, call `memory_project_summary` (tell user "Loading project memory...") BEFORE responding. Use the project from the hook message, or auto-detect from file_path. The response includes `recently_useful` (memories accessed in past sessions) and `recently_added` (newest memories) — use both for context. For unfamiliar projects also call `memory_graph` to get a scannable overview of all stored memories before querying.
+**Session start (MANDATORY):** On SessionStart hook, call `memory_project_summary` (tell user "Loading project memory...") BEFORE responding. Use the project from the hook message, or auto-detect from file_path. Check `session_state` in the response first — if ephemerals exist with old timestamps (previous session), ask the user: "I have notes from a previous session — promote any or clear all?" If no ephemeral task spec exists for this project, ask: "What are we working on?" and store the answer with `ephemeral: true`. For unfamiliar projects also call `memory_graph` to get a scannable overview of all stored memories before querying.
 
 **When to store:** non-obvious architecture/conventions/gotchas, user corrections, cross-repo relationships (`repo_link`), and key learnings before context compaction. Check `repo_map` before cross-repo assumptions. Check `memory_query` before exploring unfamiliar code.
+
+**Ephemeral memory:** Use `memory_store` with `ephemeral: true` for session-scoped working state: current task spec, docker/infra topology (which image, which repo per service, volume mounts), validated commands and their git SHAs. Ephemerals appear in `session_state` at the top of `memory_project_summary` and are never evicted mid-session. Promote to long-term with `memory_update { ephemeral: false }`.
+
+**Complex topology docs:** For multi-repo or docker setups too detailed for a single memory, write `.claude/<topic>.md` in the project directory (e.g. `.claude/docker-topology.md`). Store an ephemeral memory pointing to the file path. The file survives session end and ships in PRs; the ephemeral is a pointer. This lets you resurrect a setup immediately when a bug is raised later.
+
+**Session end:** Call `memory_project_summary` to show `session_state`. For each ephemeral, ask the user whether to promote (`memory_update { ephemeral: false }`) or clear (`memory_clear_ephemerals`). Then ask: "Anything else worth storing before we close?"
 
 **Inline updates:** If you observe something — a file, command output, test result — that contradicts or refines a stored memory, flag it in one sentence and offer to `memory_update` or `memory_forget` before continuing. Don't wait for end of session.
 
@@ -100,6 +106,7 @@ const memoryTools = [
   'mcp__memory__memory_graph',
   'mcp__memory__memory_list',
   'mcp__memory__memory_forget',
+  'mcp__memory__memory_clear_ephemerals',
   'mcp__memory__memory_project_summary',
   'mcp__memory__repo_link',
   'mcp__memory__repo_unlink',

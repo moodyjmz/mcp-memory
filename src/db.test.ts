@@ -75,6 +75,12 @@ describe('db', () => {
     expect(db.countMemories()).toBe(2);
   });
 
+  it('updateLastAccessed is a no-op for empty array', () => {
+    db.insertMemory('m1', 'one', 'gotcha');
+    db.updateLastAccessed([]);
+    expect(db.getMemory('m1')!.last_accessed).toBeNull();
+  });
+
   it('updates last_accessed timestamps', () => {
     db.insertMemory('m1', 'one', 'gotcha');
     db.insertMemory('m2', 'two', 'convention');
@@ -212,6 +218,21 @@ describe('updateMemory', () => {
     expect(row.file_path).toBe('/a/b.ts');
   });
 
+  it('updates file_path', () => {
+    db.updateMemory('m1', { file_path: '/new/path.ts' });
+    expect(db.getMemory('m1')!.file_path).toBe('/new/path.ts');
+  });
+
+  it('clears file_path with null', () => {
+    db.updateMemory('m1', { file_path: null });
+    expect(db.getMemory('m1')!.file_path).toBeNull();
+  });
+
+  it('updates ephemeral to true', () => {
+    db.updateMemory('m1', { ephemeral: true });
+    expect(db.getMemory('m1')!.ephemeral).toBe(1);
+  });
+
   it('no-op when no fields provided', () => {
     db.updateMemory('m1', {});
     expect(db.getMemory('m1')!.text).toBe('original text');
@@ -322,8 +343,89 @@ describe('migrations', () => {
     expect(names).toContain('pinned');
     expect(names).toContain('tags');
     expect(names).toContain('load_with');
+    expect(names).toContain('ephemeral');
 
     db.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('ephemeral memories', () => {
+  let db: MemoryDb;
+  let dir: string;
+
+  beforeEach(() => {
+    ({ db, dir } = createTestDb());
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('defaults to non-ephemeral', () => {
+    db.insertMemory('m1', 'fact', 'gotcha');
+    expect(db.getMemory('m1')!.ephemeral).toBe(0);
+  });
+
+  it('stores an ephemeral memory', () => {
+    db.insertMemory('m1', 'current task', 'decision', null, null, 'proj', false, null, null, true);
+    expect(db.getMemory('m1')!.ephemeral).toBe(1);
+  });
+
+  it('promotes via updateMemory', () => {
+    db.insertMemory('m1', 'docker setup', 'architecture', null, null, 'proj', false, null, null, true);
+    db.updateMemory('m1', { ephemeral: false });
+    expect(db.getMemory('m1')!.ephemeral).toBe(0);
+  });
+
+  it('listEphemeralMemories returns only ephemerals for the project', () => {
+    db.insertMemory('e1', 'task spec', 'decision', null, null, 'proj-a', false, null, null, true);
+    db.insertMemory('e2', 'working cmd', 'convention', null, null, 'proj-a', false, null, null, true);
+    db.insertMemory('p1', 'long-term fact', 'architecture', null, null, 'proj-a');
+    db.insertMemory('e3', 'other project ephemeral', 'decision', null, null, 'proj-b', false, null, null, true);
+
+    const rows = db.listEphemeralMemories('proj-a');
+    expect(rows).toHaveLength(2);
+    expect(rows.every(r => r.ephemeral === 1)).toBe(true);
+    expect(rows.every(r => r.project === 'proj-a')).toBe(true);
+  });
+
+  it('clearEphemeralMemories removes only ephemerals for the project', () => {
+    db.insertMemory('e1', 'task spec', 'decision', null, null, 'proj-a', false, null, null, true);
+    db.insertMemory('e2', 'working cmd', 'convention', null, null, 'proj-a', false, null, null, true);
+    db.insertMemory('p1', 'long-term fact', 'architecture', null, null, 'proj-a');
+    db.insertMemory('e3', 'other project ephemeral', 'decision', null, null, 'proj-b', false, null, null, true);
+
+    const cleared = db.clearEphemeralMemories('proj-a');
+    expect(cleared).toHaveLength(2);
+    expect(cleared).toContain('e1');
+    expect(cleared).toContain('e2');
+
+    // long-term memory untouched
+    expect(db.getMemory('p1')).toBeDefined();
+    // other project untouched
+    expect(db.getMemory('e3')).toBeDefined();
+    // ephemerals gone
+    expect(db.getMemory('e1')).toBeUndefined();
+    expect(db.getMemory('e2')).toBeUndefined();
+  });
+
+  it('clearEphemeralMemories returns empty array when none exist', () => {
+    db.insertMemory('p1', 'long-term fact', 'architecture', null, null, 'proj-a');
+    expect(db.clearEphemeralMemories('proj-a')).toHaveLength(0);
+  });
+
+  it('getEvictableIds excludes ephemeral memories', () => {
+    db.insertMemory('e1', 'ephemeral', 'gotcha', null, null, null, false, null, null, true);
+    db.insertMemory('n1', 'normal', 'gotcha');
+    db.insertMemory('n2', 'normal2', 'gotcha');
+
+    // With cap of 1, 2 are evictable — but only normal memories qualify
+    const ids = db.getEvictableIds({ maxMemories: 1 });
+    expect(ids).not.toContain('e1');
+    expect(ids).toHaveLength(2);
+    expect(ids).toContain('n1');
+    expect(ids).toContain('n2');
   });
 });

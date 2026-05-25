@@ -27,6 +27,7 @@ export interface MemoryRow {
   pinned: number; // 0 or 1 (SQLite boolean)
   tags: string | null; // comma-separated tags for search enrichment
   load_with: string | null; // comma-separated memory IDs to auto-surface with this one
+  ephemeral: number; // 0 or 1 — session-scoped, cleared at session end unless promoted
 }
 
 export interface StalenessResult {

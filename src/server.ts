@@ -90,8 +90,9 @@ server.registerTool('memory_store', {
     pinned: z.boolean().optional().describe('Pin this memory so it is never evicted. Use for user-provided preferences and permanent facts.'),
     tags: z.array(z.string()).optional().describe('Keywords/tags to improve search discoverability. These are embedded alongside the text for semantic matching.'),
     load_with: z.array(z.string()).optional().describe('IDs of other memories that should always surface alongside this one. Use when two facts are only useful together.'),
+    ephemeral: z.boolean().optional().describe('Mark as session-scoped working state (docker topology, current task spec, validated commands). Shown at top of memory_project_summary. Cleared at session end unless promoted via memory_update.'),
   },
-}, async ({ text, category, file_path, project, pinned, tags, load_with }) => {
+}, async ({ text, category, file_path, project, pinned, tags, load_with, ephemeral }) => {
   const db = getDefaultDb();
   const index = getDefaultIndex();
 
@@ -127,7 +128,7 @@ server.registerTool('memory_store', {
     };
   }
 
-  db.insertMemory(result.id, text, category as MemoryCategory, storedPath, git_sha, resolvedProject, pinned, tagsString, loadWithString);
+  db.insertMemory(result.id, text, category as MemoryCategory, storedPath, git_sha, resolvedProject, pinned, tagsString, loadWithString, ephemeral);
 
   // Evict old memories if over limit
   const evicted = await evictIfNeeded();
@@ -142,6 +143,7 @@ server.registerTool('memory_store', {
         file_path: storedPath || null,
         project: resolvedProject || null,
         pinned: pinned || false,
+        ephemeral: ephemeral || false,
         tags: tags || null,
         load_with: load_with || null,
         ...(evicted > 0 ? { evicted } : {}),
@@ -256,7 +258,7 @@ server.registerTool('memory_list', {
 // ─── memory_update ───────────────────────────────────────────────────────────
 
 server.registerTool('memory_update', {
-  description: 'Amend an existing memory — update text, tags, category, file_path, pinned, or load_with without deleting and re-creating. If text or tags change the vector is re-embedded automatically.',
+  description: 'Amend an existing memory — update text, tags, category, file_path, pinned, ephemeral, or load_with without deleting and re-creating. If text or tags change the vector is re-embedded automatically. Use ephemeral: false to promote a session-scoped memory to long-term.',
   inputSchema: {
     id: z.string().describe('The memory ID to update'),
     text: z.string().optional().describe('New text (triggers re-embedding)'),
@@ -265,8 +267,9 @@ server.registerTool('memory_update', {
     tags: z.array(z.string()).nullable().optional().describe('Replace tags (null to clear)'),
     pinned: z.boolean().optional().describe('Set pinned status'),
     load_with: z.array(z.string()).nullable().optional().describe('Replace load_with IDs (null to clear). IDs of memories that should always surface alongside this one.'),
+    ephemeral: z.boolean().optional().describe('Set to false to promote a session-scoped memory to long-term permanent storage.'),
   },
-}, async ({ id, text, category, file_path, tags, pinned, load_with }) => {
+}, async ({ id, text, category, file_path, tags, pinned, load_with, ephemeral }) => {
   const db = getDefaultDb();
   const index = getDefaultIndex();
 
@@ -309,6 +312,7 @@ server.registerTool('memory_update', {
     ...(tags !== undefined ? { tags: newTags } : {}),
     ...(pinned !== undefined ? { pinned } : {}),
     ...(loadWithString !== undefined ? { load_with: loadWithString } : {}),
+    ...(ephemeral !== undefined ? { ephemeral } : {}),
   });
 
   const updated = db.getMemory(id);
@@ -323,6 +327,7 @@ server.registerTool('memory_update', {
         tags: updated?.tags,
         load_with: updated?.load_with ? updated.load_with.split(',').map(s => s.trim()) : null,
         pinned: updated?.pinned === 1,
+        ephemeral: updated?.ephemeral === 1,
         re_embedded: textChanged || tagsChanged,
       }, null, 2),
     }],
@@ -357,6 +362,48 @@ server.registerTool('memory_forget', {
     content: [{
       type: 'text' as const,
       text: JSON.stringify({ forgotten: true, id, text: existing.text }, null, 2),
+    }],
+  };
+});
+
+// ─── memory_clear_ephemerals ─────────────────────────────────────────────────
+
+server.registerTool('memory_clear_ephemerals', {
+  description: 'Clear all session-scoped (ephemeral) memories for a project. Use at session end after reviewing which to promote. Removes from both vector index and database.',
+  inputSchema: {
+    project: z.string().min(1).optional().describe('Project identifier — only ephemerals for this project are cleared'),
+    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given'),
+  },
+}, async ({ project, file_path }) => {
+  const db = getDefaultDb();
+  const index = getDefaultIndex();
+
+  const resolvedProject = project || (file_path ? getProjectId(file_path) : null);
+  if (!resolvedProject) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ error: 'Could not determine project. Provide project or file_path.' }, null, 2),
+      }],
+    };
+  }
+
+  // List IDs before any deletion so Vectra can be cleaned first
+  const rows = db.listEphemeralMemories(resolvedProject);
+  const ids = rows.map(r => r.id);
+
+  // Vectra first — SQLite records remain as fallback if Vectra fails partway
+  for (const id of ids) {
+    try { await index.deleteFact(id); } catch { /* already gone from index */ }
+  }
+
+  // SQLite last — atomic via RETURNING in db
+  db.clearEphemeralMemories(resolvedProject);
+
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({ cleared: ids.length, ids, project: resolvedProject }, null, 2),
     }],
   };
 });
@@ -503,32 +550,44 @@ server.registerTool('memory_project_summary', {
   }
 
   const allMemories = db.listMemories(undefined, resolvedProject);
+  const longTerm = allMemories.filter(r => r.ephemeral === 0);
+  const ephemerals = allMemories.filter(r => r.ephemeral === 1);
 
-  // Category counts
+  // Category counts (long-term only)
   const categoryCounts: Record<string, number> = {};
-  for (const row of allMemories) {
+  for (const row of longTerm) {
     categoryCounts[row.category] = (categoryCounts[row.category] || 0) + 1;
   }
 
-  // Pinned memories (full text)
-  const pinned = allMemories
+  // Pinned memories (full text, long-term only)
+  const pinned = longTerm
     .filter(r => r.pinned === 1)
     .map(r => ({ id: r.id, text: r.text, category: r.category }));
 
   const excerpt = (text: string) => text.length > 120 ? text.slice(0, 117) + '...' : text;
 
-  // Recently useful: memories that have been accessed, ordered by last access
-  const recentlyUseful = [...allMemories]
+  // Recently useful: long-term memories that have been accessed, ordered by last access
+  const recentlyUseful = [...longTerm]
     .filter(r => r.last_accessed)
     .sort((a, b) => b.last_accessed!.localeCompare(a.last_accessed!))
     .slice(0, 5)
     .map(r => ({ id: r.id, text: excerpt(r.text), category: r.category }));
 
-  // Recently added: newest memories by creation date
-  const recentlyAdded = [...allMemories]
+  // Recently added: newest long-term memories by creation date
+  const recentlyAdded = [...longTerm]
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .slice(0, 5)
     .map(r => ({ id: r.id, text: excerpt(r.text), category: r.category }));
+
+  // Session state: ephemeral memories with timestamps so Claude can judge staleness
+  const sessionState = ephemerals.map(r => ({
+    id: r.id,
+    text: r.text,
+    category: r.category,
+    created_at: r.created_at,
+    age_hours: Math.round((Date.now() - new Date(r.created_at).getTime()) / 3600000),
+    tags: r.tags ? r.tags.split(',').map(t => t.trim()) : null,
+  }));
 
   // Repo relationships
   const relationships = db.getRepoMap(resolvedProject);
@@ -538,7 +597,8 @@ server.registerTool('memory_project_summary', {
       type: 'text' as const,
       text: JSON.stringify({
         project: resolvedProject,
-        total_memories: allMemories.length,
+        session_state: sessionState,
+        total_memories: longTerm.length,
         category_counts: categoryCounts,
         pinned_memories: pinned,
         recently_useful: recentlyUseful,

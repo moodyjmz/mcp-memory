@@ -24,16 +24,19 @@ export interface MemoryUpdateFields {
   tags?: string | null;
   pinned?: boolean;
   load_with?: string | null;
+  ephemeral?: boolean;
 }
 
 export interface MemoryDb {
-  insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned?: boolean, tags?: string | null, load_with?: string | null): void;
+  insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned?: boolean, tags?: string | null, load_with?: string | null, ephemeral?: boolean): void;
   updateMemory(id: string, fields: MemoryUpdateFields): void;
   pinMemory(id: string): void;
   unpinMemory(id: string): void;
   deleteMemory(id: string): void;
   getMemory(id: string): MemoryRow | undefined;
   listMemories(category?: MemoryCategory, project?: string): MemoryRow[];
+  listEphemeralMemories(project: string): MemoryRow[];
+  clearEphemeralMemories(project: string): string[];
   updateLastAccessed(ids: string[]): void;
   countMemories(): number;
   getEvictableIds(config: EvictionConfig): string[];
@@ -61,7 +64,11 @@ export function createMemoryDb(dbPath: string): MemoryDb {
       git_sha TEXT,
       project TEXT,
       created_at TEXT NOT NULL,
-      last_accessed TEXT
+      last_accessed TEXT,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      tags TEXT,
+      load_with TEXT,
+      ephemeral INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
     CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project);
@@ -94,13 +101,17 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   if (!columns.some(c => c.name === 'load_with')) {
     db.exec('ALTER TABLE memories ADD COLUMN load_with TEXT');
   }
+  if (!columns.some(c => c.name === 'ephemeral')) {
+    db.exec('ALTER TABLE memories ADD COLUMN ephemeral INTEGER NOT NULL DEFAULT 0');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memories_ephemeral ON memories(ephemeral)');
 
   return {
-    insertMemory(id, text, category, file_path, git_sha, project, pinned = false, tags = null, load_with = null) {
+    insertMemory(id, text, category, file_path, git_sha, project, pinned = false, tags = null, load_with = null, ephemeral = false) {
       db.prepare(`
-        INSERT OR REPLACE INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned, tags, load_with)
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
-      `).run(id, text, category, file_path ?? null, git_sha ?? null, project ?? null, new Date().toISOString(), pinned ? 1 : 0, tags ?? null, load_with ?? null);
+        INSERT OR REPLACE INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned, tags, load_with, ephemeral)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+      `).run(id, text, category, file_path ?? null, git_sha ?? null, project ?? null, new Date().toISOString(), pinned ? 1 : 0, tags ?? null, load_with ?? null, ephemeral ? 1 : 0);
     },
 
     updateMemory(id, fields) {
@@ -113,6 +124,7 @@ export function createMemoryDb(dbPath: string): MemoryDb {
       if ('tags' in fields) { setParts.push('tags = ?'); params.push(fields.tags ?? null); }
       if (fields.pinned !== undefined) { setParts.push('pinned = ?'); params.push(fields.pinned ? 1 : 0); }
       if ('load_with' in fields) { setParts.push('load_with = ?'); params.push(fields.load_with ?? null); }
+      if (fields.ephemeral !== undefined) { setParts.push('ephemeral = ?'); params.push(fields.ephemeral ? 1 : 0); }
 
       if (setParts.length === 0) return;
       params.push(id);
@@ -175,10 +187,23 @@ export function createMemoryDb(dbPath: string): MemoryDb {
 
       return (db.prepare(`
         SELECT id FROM memories
-        WHERE pinned = 0
+        WHERE pinned = 0 AND ephemeral = 0
         ORDER BY COALESCE(last_accessed, created_at) ASC
         LIMIT ?
       `).all(excess) as { id: string }[]).map(r => r.id);
+    },
+
+    listEphemeralMemories(project) {
+      return db.prepare(
+        'SELECT * FROM memories WHERE ephemeral = 1 AND project = ? ORDER BY created_at DESC'
+      ).all(project) as MemoryRow[];
+    },
+
+    clearEphemeralMemories(project) {
+      const rows = db.prepare(
+        'DELETE FROM memories WHERE ephemeral = 1 AND project = ? RETURNING id'
+      ).all(project) as { id: string }[];
+      return rows.map(r => r.id);
     },
 
     addRelationship(source, target, type, description, file_path) {
