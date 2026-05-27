@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.15](https://github.com/moodyjmz/mcp-memory/compare/v2.3.14...v2.3.15) (2026-05-27)
+
+
+### Bug Fixes
+
+* **deps-dev:** Bump @types/node from 25.6.0 to 25.9.1 ([f03f838](https://github.com/moodyjmz/mcp-memory/commit/f03f838f4365d6ad8f151f474ce6a8211e868a46))
+
 ## [2.3.14](https://github.com/moodyjmz/mcp-memory/compare/v2.3.13...v2.3.14) (2026-05-27)
 
 
