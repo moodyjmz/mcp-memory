@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.14](https://github.com/moodyjmz/mcp-memory/compare/v2.3.13...v2.3.14) (2026-05-27)
+
+
+### Bug Fixes
+
+* add [skip ci] to release commit to prevent workflow loop ([51f88fe](https://github.com/moodyjmz/mcp-memory/commit/51f88feb384b895d22510ade0a63b47af8554cbe))
+* **deps:** Bump vectra from 0.12.3 to 0.15.0 ([13333d5](https://github.com/moodyjmz/mcp-memory/commit/13333d5f33993affd64d7463cd38f87dd1f673ab))
+
 ## [2.3.13](https://github.com/moodyjmz/mcp-memory/compare/v2.3.12...v2.3.13) (2026-05-27)
 
 ## [2.3.12](https://github.com/moodyjmz/mcp-memory/compare/v2.3.11...v2.3.12) (2026-05-27)
