@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.1](https://github.com/moodyjmz/mcp-memory/compare/v2.3.0...v2.3.1) (2026-05-27)
+
+
+### Bug Fixes
+
+* add missing @emnapi/core and @emnapi/runtime lockfile entries for Linux CI ([f102cd4](https://github.com/moodyjmz/mcp-memory/commit/f102cd4364ce7100f924cd8fa89d9e2a029399cb))
+* resolve all Dependabot security alerts via lockfile update ([75fb48b](https://github.com/moodyjmz/mcp-memory/commit/75fb48bb3f1cd339291162546a5b1c920f0dea11))
+
 # [2.3.0](https://github.com/moodyjmz/mcp-memory/compare/v2.2.9...v2.3.0) (2026-05-25)
 
 
