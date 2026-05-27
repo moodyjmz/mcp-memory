@@ -13,6 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
@@ -34,6 +35,6 @@ jobs:
 
       - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         # release-it exits non-zero when there are no releasable commits (no feat/fix since last tag)
         run: npm run release -- --ci || echo "Nothing to release"
