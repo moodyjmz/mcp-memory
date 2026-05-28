@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.1](https://github.com/moodyjmz/mcp-memory/compare/v2.4.0...v2.4.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* **deps:** Bump onnxruntime-node from 1.25.1 to 1.26.0 ([dc7d049](https://github.com/moodyjmz/mcp-memory/commit/dc7d049d4d6029da6ee74e3b9edcca1e4f1c81a7))
+
 # [2.4.0](https://github.com/moodyjmz/mcp-memory/compare/v2.3.16...v2.4.0) (2026-05-28)
 
 
