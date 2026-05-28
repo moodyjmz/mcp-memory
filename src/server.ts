@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { execSync } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import { getDefaultIndex } from './memory-index.js';
 import { getDefaultDb } from './db.js';
@@ -9,6 +10,7 @@ import { checkStaleness } from './staleness.js';
 import { getEmbedder } from './embeddings.js';
 import { CATEGORIES, DEFAULT_EVICTION_CONFIG } from './types.js';
 import type { MemoryCategory } from './types.js';
+import { scanClaudeFiles, getRecentlyChangedFiles, isValidClaudeFilePath } from './project-utils.js';
 
 function getGitSha(file_path: string): string | null {
   try {
@@ -592,6 +594,43 @@ server.registerTool('memory_project_summary', {
   // Repo relationships
   const relationships = db.getRepoMap(resolvedProject);
 
+  // .claude/ file scan — only when a local file_path is provided
+  type ClaudeFileEntry = { rel_path: string; name: string; has_pointer: boolean };
+  let claudeFiles: ClaudeFileEntry[] | undefined;
+  let memoriesForRecentFiles: Array<{ id: string; text: string; category: string; file_path: string }> | undefined;
+
+  if (file_path) {
+    const repoRoot = getGitRootPath(file_path);
+    if (repoRoot) {
+      // .claude/ drift detection
+      const found = scanClaudeFiles(repoRoot);
+      if (found.length > 0) {
+        claudeFiles = found.map(f => ({
+          rel_path: f.rel_path,
+          name: f.name,
+          has_pointer: allMemories.some(m => m.file_path === f.rel_path),
+        }));
+      }
+
+      // Git-aware: memories whose file_path matches recently changed files
+      const recentFiles = getRecentlyChangedFiles(repoRoot, 20);
+      if (recentFiles.length > 0) {
+        const recentSet = new Set(recentFiles);
+        const matched = allMemories.filter(r =>
+          r.file_path && recentSet.has(r.file_path)
+        );
+        if (matched.length > 0) {
+          memoriesForRecentFiles = matched.map(r => ({
+            id: r.id,
+            text: r.text.length > 120 ? r.text.slice(0, 117) + '...' : r.text,
+            category: r.category,
+            file_path: r.file_path!,
+          }));
+        }
+      }
+    }
+  }
+
   return {
     content: [{
       type: 'text' as const,
@@ -604,6 +643,82 @@ server.registerTool('memory_project_summary', {
         recently_useful: recentlyUseful,
         recently_added: recentlyAdded,
         repo_relationships: relationships,
+        ...(claudeFiles !== undefined ? { claude_files: claudeFiles } : {}),
+        ...(memoriesForRecentFiles !== undefined ? { memories_for_recent_files: memoriesForRecentFiles } : {}),
+      }, null, 2),
+    }],
+  };
+});
+
+// ─── memory_store_file ───────────────────────────────────────────────────────
+
+server.registerTool('memory_store_file', {
+  description: 'Atomically write a .claude/*.md reference file to disk AND store a pointer memory that links to it. Use this instead of separate Write + memory_store calls. Enforces .md extension and .claude/ directory to prevent accidental writes outside reference docs.',
+  inputSchema: {
+    file_path: z.string().describe('Absolute path to the .claude/*.md file to write. Must end in .md and contain .claude/ in the path.'),
+    content: z.string().describe('Markdown content to write to the file'),
+    pointer_text: z.string().describe('Memory text describing what the file contains — this is what gets searched later'),
+    category: z.enum(CATEGORIES).describe('Memory category for the pointer'),
+    project: z.string().optional().describe('Project identifier. Auto-detected from file_path if not given.'),
+    pinned: z.boolean().optional().describe('Pin the pointer memory so it is never evicted'),
+    tags: z.array(z.string()).optional().describe('Tags to improve search discoverability of the pointer memory'),
+    load_with: z.array(z.string()).optional().describe('IDs of other memories to always surface alongside this pointer'),
+    ephemeral: z.boolean().optional().describe('Mark the pointer memory as session-scoped. Use when the file itself is temporary.'),
+  },
+}, async ({ file_path, content, pointer_text, category, project, pinned, tags, load_with, ephemeral }) => {
+  // Safety: only allow writes to .claude/*.md paths
+  const absPath = path.isAbsolute(file_path) ? file_path : path.resolve(file_path);
+  if (!isValidClaudeFilePath(file_path)) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          written: false,
+          error: 'file_path must be under a .claude/ directory and end with .md',
+        }, null, 2),
+      }],
+    };
+  }
+
+  // Write the file
+  fs.mkdirSync(path.dirname(absPath), { recursive: true });
+  fs.writeFileSync(absPath, content, 'utf8');
+
+  // Store the pointer memory
+  const db = getDefaultDb();
+  const index = getDefaultIndex();
+  const resolvedProject = project || getProjectId(file_path) || undefined;
+  const storedPath = toRelativePath(file_path);
+  const git_sha = getGitSha(file_path); // null until file is committed — that's fine
+  const tagsString = tags?.length ? tags.join(', ') : undefined;
+  const loadWithString = load_with?.length ? load_with.join(',') : undefined;
+
+  const result = await index.addFact(pointer_text, {
+    category: category as MemoryCategory,
+    file_path: storedPath,
+    project: resolvedProject,
+    tags: tagsString,
+  });
+
+  if (result.added) {
+    db.insertMemory(result.id, pointer_text, category as MemoryCategory, storedPath, git_sha, resolvedProject, pinned, tagsString, loadWithString, ephemeral);
+  }
+
+  const evicted = await evictIfNeeded();
+
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({
+        written: true,
+        file_path: storedPath,
+        memory_stored: result.added,
+        memory_id: result.id,
+        category,
+        project: resolvedProject || null,
+        ephemeral: ephemeral || false,
+        ...(result.added ? {} : { existing_memory_id: result.id, reason: 'Semantically similar memory already exists' }),
+        ...(evicted > 0 ? { evicted } : {}),
       }, null, 2),
     }],
   };
