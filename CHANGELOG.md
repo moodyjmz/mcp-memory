@@ -1,5 +1,12 @@
 # Changelog
 
+# [2.4.0](https://github.com/moodyjmz/mcp-memory/compare/v2.3.16...v2.4.0) (2026-05-28)
+
+
+### Features
+
+* auto-scan .claude/, git-aware project_summary, and memory_store_file ([e3bf39c](https://github.com/moodyjmz/mcp-memory/commit/e3bf39c374e034e7c55552a1517660a87aa12704))
+
 ## [2.3.16](https://github.com/moodyjmz/mcp-memory/compare/v2.3.15...v2.3.16) (2026-05-27)
 
 
