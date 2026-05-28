@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.2](https://github.com/moodyjmz/mcp-memory/compare/v2.4.1...v2.4.2) (2026-05-28)
+
+
+### Bug Fixes
+
+* **deps:** Bump better-sqlite3 from 12.8.0 to 12.10.0 ([b7e26c4](https://github.com/moodyjmz/mcp-memory/commit/b7e26c45281aca17dae61838dffea588a74e1d11))
+
 ## [2.4.1](https://github.com/moodyjmz/mcp-memory/compare/v2.4.0...v2.4.1) (2026-05-28)
 
 
