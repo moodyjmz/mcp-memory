@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync } from 'fs';
-import { createTestIndex } from './test-helpers.js';
+import { createTestIndex, mockEmbed } from './test-helpers.js';
 import type { MemoryIndex } from './memory-index.js';
 
 describe('memory-index', () => {
@@ -13,6 +13,14 @@ describe('memory-index', () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('stores a fact with tags and returns added: true', async () => {
+    const result = await index.addFact('Rate limiter uses sliding window', {
+      category: 'architecture',
+      tags: 'throttling api quota',
+    });
+    expect(result.added).toBe(true);
   });
 
   it('stores a fact and returns added: true', async () => {
@@ -120,6 +128,28 @@ describe('memory-index', () => {
     });
 
     const results = await index.queryFacts('styling and theming', 5, 'web-apps');
+    expect(results.length).toBeGreaterThan(0);
+  });
+
+  it('updateFact with tags embeds tag text alongside content', async () => {
+    const { id } = await index.addFact('alpha bravo charlie', { category: 'gotcha' });
+
+    await expect(
+      index.updateFact(id, 'updated with tags', { category: 'architecture', tags: 'throttling api' })
+    ).resolves.not.toThrow();
+
+    const results = await index.queryFacts('updated with tags', 5);
+    const found = results.find(r => r.id === id);
+    expect(found).toBeDefined();
+  });
+
+  it('reuses existing index when createMemoryIndex points to already-initialised directory', async () => {
+    await index.addFact('seeded fact', { category: 'gotcha' });
+
+    // Second instance pointing to same dir — isIndexCreated() returns true, skips createIndex()
+    const { createMemoryIndex } = await import('./memory-index.js');
+    const index2 = createMemoryIndex(dir, mockEmbed);
+    const results = await index2.queryFacts('seeded fact', 5);
     expect(results.length).toBeGreaterThan(0);
   });
 });

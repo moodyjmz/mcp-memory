@@ -34,6 +34,10 @@ describe('isValidClaudeFilePath', () => {
     expect(isValidClaudeFilePath('/repo/.claude/icon-migration.md')).toBe(true);
   });
 
+  it('accepts a relative path that resolves to .claude/*.md', () => {
+    expect(isValidClaudeFilePath('.claude/notes.md')).toBe(true);
+  });
+
   it('rejects a non-.md file inside .claude/', () => {
     expect(isValidClaudeFilePath('/repo/.claude/settings.json')).toBe(false);
   });
@@ -70,6 +74,11 @@ describe('scanClaudeFiles', () => {
   it('returns empty array when .claude/ exists but has no .md files', () => {
     mkdirSync(path.join(dir, '.claude'));
     writeFileSync(path.join(dir, '.claude', 'settings.json'), '{}');
+    expect(scanClaudeFiles(dir)).toEqual([]);
+  });
+
+  it('returns empty array when .claude exists as a file (readdirSync throws)', () => {
+    writeFileSync(path.join(dir, '.claude'), 'not a directory');
     expect(scanClaudeFiles(dir)).toEqual([]);
   });
 
