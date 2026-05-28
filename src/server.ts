@@ -10,7 +10,7 @@ import { checkStaleness } from './staleness.js';
 import { getEmbedder } from './embeddings.js';
 import { CATEGORIES, DEFAULT_EVICTION_CONFIG } from './types.js';
 import type { MemoryCategory } from './types.js';
-import { scanClaudeFiles, getRecentlyChangedFiles } from './project-utils.js';
+import { scanClaudeFiles, getRecentlyChangedFiles, isValidClaudeFilePath } from './project-utils.js';
 
 function getGitSha(file_path: string): string | null {
   try {
@@ -608,11 +608,7 @@ server.registerTool('memory_project_summary', {
         claudeFiles = found.map(f => ({
           rel_path: f.rel_path,
           name: f.name,
-          has_pointer: allMemories.some(m => m.file_path && (
-            m.file_path === f.rel_path ||
-            m.file_path.endsWith('/' + f.rel_path) ||
-            m.file_path === f.rel_path.replace(/\\/g, '/')
-          )),
+          has_pointer: allMemories.some(m => m.file_path === f.rel_path),
         }));
       }
 
@@ -672,8 +668,7 @@ server.registerTool('memory_store_file', {
 }, async ({ file_path, content, pointer_text, category, project, pinned, tags, load_with, ephemeral }) => {
   // Safety: only allow writes to .claude/*.md paths
   const absPath = path.isAbsolute(file_path) ? file_path : path.resolve(file_path);
-  const normalised = absPath.replace(/\\/g, '/');
-  if (!normalised.includes('/.claude/') || !normalised.endsWith('.md')) {
+  if (!isValidClaudeFilePath(file_path)) {
     return {
       content: [{
         type: 'text' as const,
