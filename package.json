@@ -22,7 +22,7 @@
     "vectra": "^0.15.0"
   },
   "devDependencies": {
-    "@release-it/conventional-changelog": "^11.0.0",
+    "@release-it/conventional-changelog": "^11.0.1",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^25.9.1",
     "@vitest/coverage-v8": "^4.1.7",
