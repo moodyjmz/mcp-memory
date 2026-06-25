@@ -43,22 +43,6 @@ npm run setup               # build + register MCP server + configure hooks/perm
 
 `setup.sh` handles first-time wiring: compiles, registers the server globally via `claude mcp add memory -s user node dist/server.js`, copies hooks to `~/.claude/hooks/`, and patches `~/.claude/settings.json` with tool permissions and hook entries.
 
-### Ongoing iteration
-
-```
-edit → npm run build → restart Claude Code
-```
-
-`npm run dev` runs `tsc --watch` (rebuilds on save) — but Claude Code still needs a restart after each build to pick up the new `dist/`.
-
-### Run a single test file
-
-```bash
-npx vitest run src/db.test.ts
-```
-
-Tests are co-located: `src/<module>.test.ts` alongside each source file.
-
 ### MCP inspector
 
 ```bash
@@ -99,7 +83,7 @@ Session-scoped. Shown in `session_state` at top of `memory_project_summary`. Cle
 ## Code conventions
 
 - **TypeScript strict mode** — no implicit any.
-- Tests live alongside source as `*.test.ts`. Run with `vitest`.
+- Tests live alongside source as `*.test.ts`. Run with `vitest`. Tests use real SQLite (in-memory via better-sqlite3) and a real Vectra index — no mocks.
 - Use `npm ci --legacy-peer-deps` everywhere — `npm-shrinkwrap.json` locks deps, `--legacy-peer-deps` handles a peer conflict in the HuggingFace dep tree.
 - The SQLite DB and Vectra index must stay in sync. If you delete from one, delete from the other. `memory_forget` and eviction both do this.
 - Semantic dedup threshold is 0.85 cosine similarity (`memory-index.ts`). Lowering it causes false dedup; raising it allows near-duplicate memories.
