@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.4.6](https://github.com/moodyjmz/mcp-memory/compare/v2.4.4...v2.4.6) (2026-06-25)
+
+
+### Bug Fixes
+
+* **deps-dev:** Bump @vitest/coverage-v8 from 4.1.7 to 4.1.8 ([#69](https://github.com/moodyjmz/mcp-memory/issues/69)) ([1f00d3f](https://github.com/moodyjmz/mcp-memory/commit/1f00d3f4d0392e17c81524a088c6f230c01cf28d))
+* **deps-dev:** Bump release-it from 20.0.1 to 20.2.0 ([#67](https://github.com/moodyjmz/mcp-memory/issues/67)) ([60921fc](https://github.com/moodyjmz/mcp-memory/commit/60921fcfdea459f4017771cef28b36c6f9f813b5))
+* **deps-dev:** Bump vite from 8.0.14 to 8.0.16 ([#73](https://github.com/moodyjmz/mcp-memory/issues/73)) ([700da40](https://github.com/moodyjmz/mcp-memory/commit/700da4030f42691b1321cf589a313069abc54497))
+
 ## [2.4.5](https://github.com/moodyjmz/mcp-memory/compare/v2.4.4...v2.4.5) (2026-06-25)
 
 
