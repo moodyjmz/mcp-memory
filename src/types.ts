@@ -1,6 +1,11 @@
 // Note: cross-repo relationships go in repo_relationships via repo_link/repo_map, not as memories.
 // 'relationship' is kept here only for backward-compat with any existing stored memories.
-export const CATEGORIES = ['architecture', 'convention', 'gotcha', 'decision', 'preference', 'relationship'] as const;
+export const CATEGORIES = ['architecture', 'convention', 'gotcha', 'decision', 'preference', 'relationship', 'person'] as const;
+
+// Categories excluded from LRU eviction (beyond pinned/ephemeral).
+// 'person' profiles are low-volume, high-value, slow-changing — evicting them silently loses
+// reviewer trust calibration built up over time.
+export const EVICTION_EXEMPT_CATEGORIES: ReadonlySet<string> = new Set(['person']);
 
 export type MemoryCategory = typeof CATEGORIES[number];
 

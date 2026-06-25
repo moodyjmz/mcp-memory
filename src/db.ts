@@ -4,6 +4,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 import type { MemoryRow, MemoryCategory, EvictionConfig } from './types.js';
+import { EVICTION_EXEMPT_CATEGORIES } from './types.js';
 
 const DEFAULT_DATA_DIR = path.join(os.homedir(), '.claude-memory');
 
@@ -185,12 +186,13 @@ export function createMemoryDb(dbPath: string): MemoryDb {
       const excess = this.countMemories() - config.maxMemories;
       if (excess <= 0) return [];
 
+      const exemptList = [...EVICTION_EXEMPT_CATEGORIES].map(() => '?').join(',');
       return (db.prepare(`
         SELECT id FROM memories
-        WHERE pinned = 0 AND ephemeral = 0
+        WHERE pinned = 0 AND ephemeral = 0 AND category NOT IN (${exemptList})
         ORDER BY COALESCE(last_accessed, created_at) ASC
         LIMIT ?
-      `).all(excess) as { id: string }[]).map(r => r.id);
+      `).all([...EVICTION_EXEMPT_CATEGORIES, excess]) as { id: string }[]).map(r => r.id);
     },
 
     listEphemeralMemories(project) {
