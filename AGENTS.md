@@ -35,6 +35,38 @@ No Java required. No Grunt for day-to-day work — `tsc` is the build.
 
 The MCP server is a stdio server (`dist/server.js`). Restart Claude Code to pick up a rebuilt `dist/`.
 
+### First-time setup
+
+```bash
+npm run setup               # build + register MCP server + configure hooks/permissions
+```
+
+`setup.sh` handles first-time wiring: compiles, registers the server globally via `claude mcp add memory -s user node dist/server.js`, copies hooks to `~/.claude/hooks/`, and patches `~/.claude/settings.json` with tool permissions and hook entries.
+
+### Ongoing iteration
+
+```
+edit → npm run build → restart Claude Code
+```
+
+`npm run dev` runs `tsc --watch` (rebuilds on save) — but Claude Code still needs a restart after each build to pick up the new `dist/`.
+
+### Run a single test file
+
+```bash
+npx vitest run src/db.test.ts
+```
+
+Tests are co-located: `src/<module>.test.ts` alongside each source file.
+
+### MCP inspector
+
+```bash
+npx @modelcontextprotocol/inspector node dist/server.js
+```
+
+Opens a browser UI to invoke any tool manually without a full Claude Code session. Useful for smoke-testing after a build before restarting Claude Code.
+
 ## Architecture
 
 ### Storage
@@ -71,6 +103,21 @@ Session-scoped. Shown in `session_state` at top of `memory_project_summary`. Cle
 - Use `npm ci --legacy-peer-deps` everywhere — `npm-shrinkwrap.json` locks deps, `--legacy-peer-deps` handles a peer conflict in the HuggingFace dep tree.
 - The SQLite DB and Vectra index must stay in sync. If you delete from one, delete from the other. `memory_forget` and eviction both do this.
 - Semantic dedup threshold is 0.85 cosine similarity (`memory-index.ts`). Lowering it causes false dedup; raising it allows near-duplicate memories.
+
+## Release
+
+The `release.yml` workflow fires on every push to `main`. It runs tests, then calls `npm run release -- --ci`, which:
+
+- Only releases when there are `feat:` or `fix:` commits since the last tag — `chore:`, `docs:`, etc. don't trigger a release
+- Creates a git tag and GitHub release
+- Updates `CHANGELOG.md` (conventional changelog, angular preset)
+
+`npm.publish: false` in `.release-it.json` — npm publish is **not** handled by CI. After a tagged release is created, publish to npm manually:
+
+```bash
+npm run build
+npm publish
+```
 
 ## Gotchas
 
