@@ -13,7 +13,19 @@
   "plugins": {
     "@release-it/conventional-changelog": {
       "preset": {
-        "name": "angular"
+        "name": "angular",
+        "types": [
+          { "type": "feat", "section": "Features" },
+          { "type": "fix", "section": "Bug Fixes" },
+          { "type": "perf", "section": "Performance Improvements" },
+          { "type": "revert", "section": "Reverts" },
+          { "type": "docs", "hidden": true },
+          { "type": "chore", "hidden": true },
+          { "type": "style", "hidden": true },
+          { "type": "refactor", "hidden": true },
+          { "type": "test", "hidden": true },
+          { "type": "ci", "hidden": true }
+        ]
       },
       "infile": "CHANGELOG.md"
     }
