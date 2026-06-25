@@ -1,5 +1,12 @@
 # Changelog
 
+# [2.5.0](https://github.com/moodyjmz/mcp-memory/compare/v2.4.7...v2.5.0) (2026-06-25)
+
+
+### Features
+
+* add person category exempt from LRU eviction ([#76](https://github.com/moodyjmz/mcp-memory/issues/76)) ([de30f78](https://github.com/moodyjmz/mcp-memory/commit/de30f7892ad36f4b73f39e5d899be1bf8b5a2426))
+
 ## [2.4.7](https://github.com/moodyjmz/mcp-memory/compare/v2.4.6...v2.4.7) (2026-06-25)
 
 
