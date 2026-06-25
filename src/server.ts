@@ -83,10 +83,10 @@ const server = new McpServer({
 // ─── memory_store ────────────────────────────────────────────────────────────
 
 server.registerTool('memory_store', {
-  description: 'Store a fact about the codebase — architectural decisions, conventions, gotchas, or preferences. Deduplicates semantically similar memories.',
+  description: 'Store a fact about the codebase — architectural decisions, conventions, gotchas, preferences, or people. Deduplicates semantically similar memories.',
   inputSchema: {
     text: z.string().describe('The fact to remember'),
-    category: z.enum(CATEGORIES).describe('Category: architecture, convention, gotcha, decision, or preference'),
+    category: z.enum(CATEGORIES).describe('Category: architecture, convention, gotcha, decision, preference, or person (reviewer/author trust calibration — exempt from LRU eviction)'),
     file_path: z.string().optional().describe('Related file path. Converted to relative (portable) on storage. Enables staleness detection.'),
     project: z.string().optional().describe('Project identifier for multi-project filtering'),
     pinned: z.boolean().optional().describe('Pin this memory so it is never evicted. Use for user-provided preferences and permanent facts.'),
@@ -581,6 +581,11 @@ server.registerTool('memory_project_summary', {
     .slice(0, 5)
     .map(r => ({ id: r.id, text: excerpt(r.text), category: r.category }));
 
+  // People: all person-category memories — always surfaced, never evicted
+  const people = longTerm
+    .filter(r => r.category === 'person')
+    .map(r => ({ id: r.id, text: r.text, tags: r.tags ? r.tags.split(',').map(t => t.trim()) : null }));
+
   // Session state: ephemeral memories with timestamps so Claude can judge staleness
   const sessionState = ephemerals.map(r => ({
     id: r.id,
@@ -640,6 +645,7 @@ server.registerTool('memory_project_summary', {
         total_memories: longTerm.length,
         category_counts: categoryCounts,
         pinned_memories: pinned,
+        people: people.length > 0 ? people : undefined,
         recently_useful: recentlyUseful,
         recently_added: recentlyAdded,
         repo_relationships: relationships,
