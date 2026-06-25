@@ -1,5 +1,7 @@
 # Changelog
 
+## [2.5.1](https://github.com/moodyjmz/mcp-memory/compare/v2.5.0...v2.5.1) (2026-06-25)
+
 # [2.5.0](https://github.com/moodyjmz/mcp-memory/compare/v2.4.7...v2.5.0) (2026-06-25)
 
 
