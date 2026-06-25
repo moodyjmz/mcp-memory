@@ -1,6 +1,6 @@
 {
   "name": "claude-memory-mcp",
-  "version": "2.4.4",
+  "version": "2.4.5",
   "description": "MCP memory server for Claude Code — persistent, searchable codebase knowledge",
   "type": "module",
   "main": "dist/server.js",
@@ -26,7 +26,7 @@
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^25.9.1",
     "@vitest/coverage-v8": "^4.1.8",
-    "release-it": "^20.0.1",
+    "release-it": "^20.2.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
   }
