@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.7](https://github.com/moodyjmz/mcp-memory/compare/v2.4.6...v2.4.7) (2026-06-25)
+
+
+### Bug Fixes
+
+* **deps-dev:** Bump vitest from 4.1.7 to 4.1.8 ([#70](https://github.com/moodyjmz/mcp-memory/issues/70)) ([bf51e26](https://github.com/moodyjmz/mcp-memory/commit/bf51e265e131d3967813968eff39cb0082be693b))
+
 ## [2.4.6](https://github.com/moodyjmz/mcp-memory/compare/v2.4.4...v2.4.6) (2026-06-25)
 
 
