@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.4.3](https://github.com/moodyjmz/mcp-memory/compare/v2.4.2...v2.4.3) (2026-06-25)
+
+
+### Bug Fixes
+
+* **deps-dev:** Bump @release-it/conventional-changelog ([3295ed1](https://github.com/moodyjmz/mcp-memory/commit/3295ed1cbd6af55a6f26fae20c7495e541445b09))
+* **deps:** Bump tar from 7.5.13 to 7.5.16 ([#75](https://github.com/moodyjmz/mcp-memory/issues/75)) ([7aff793](https://github.com/moodyjmz/mcp-memory/commit/7aff793af9fdab57c0fc2f9a95234cf4c45ef89d))
+
 ## [2.4.2](https://github.com/moodyjmz/mcp-memory/compare/v2.4.1...v2.4.2) (2026-05-28)
 
 
