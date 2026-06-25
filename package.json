@@ -28,6 +28,6 @@
     "@vitest/coverage-v8": "^4.1.8",
     "release-it": "^20.2.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.8"
   }
 }
