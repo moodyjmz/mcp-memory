@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.3](https://github.com/moodyjmz/mcp-memory/compare/v2.5.2...v2.5.3) (2026-06-25)
+
+
+### Bug Fixes
+
+* stop release bot firing on docs and dep-bump commits ([#78](https://github.com/moodyjmz/mcp-memory/issues/78)) ([1f5afe6](https://github.com/moodyjmz/mcp-memory/commit/1f5afe6ebcb6f76969e9ce3db5a5e517074dd5a5))
+
 ## [2.5.2](https://github.com/moodyjmz/mcp-memory/compare/v2.5.1...v2.5.2) (2026-06-25)
 
 ## [2.5.1](https://github.com/moodyjmz/mcp-memory/compare/v2.5.0...v2.5.1) (2026-06-25)
