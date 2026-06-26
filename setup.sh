@@ -32,6 +32,8 @@ Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_up
 
 **Ephemeral memory:** Use `memory_store` with `ephemeral: true` for session-scoped working state: current task spec, docker/infra topology (which image, which repo per service, volume mounts), validated commands and their git SHAs. Ephemerals appear in `session_state` at the top of `memory_project_summary` and are never evicted mid-session. Promote to long-term with `memory_update { ephemeral: false }`.
 
+**cm-findings — investigation notes:** When you discover something non-obvious during investigation (a build quirk, a deploy ordering constraint, a subtle invariant), write it to `cm-findings/<topic>.md` in the repo root immediately — do not queue it for session end. Then store a long-term MCP memory pointer: `memory_store { text: "Finding: <one-line summary>. See cm-findings/<topic>.md", file_path: "cm-findings/<topic>.md", category: "gotcha" }`. Write findings as techniques and patterns, not file:line citations — "X must happen before Y or Z breaks" is durable; "line 47 of foo.js does X" rots. The `cm-findings/` directory is git-ignored (never committed); findings accumulate across sessions as a per-repo knowledge base.
+
 **Complex topology docs:** For multi-repo or docker setups too detailed for a single memory, write `.claude/<topic>.md` in the project directory (e.g. `.claude/docker-topology.md`). Store an ephemeral memory pointing to the file path. The file survives session end and ships in PRs; the ephemeral is a pointer. This lets you resurrect a setup immediately when a bug is raised later.
 
 **Session end:** Call `memory_project_summary` to show `session_state`. For each ephemeral, ask the user whether to promote (`memory_update { ephemeral: false }`) or clear (`memory_clear_ephemerals`). Then ask: "Anything else worth storing before we close?"
@@ -68,6 +70,20 @@ else
   echo "    Added memory instructions to $CLAUDE_MD"
 fi
 rm -f "$BLOCK_FILE"
+
+echo "==> Configuring global gitignore for cm-findings/..."
+GLOBAL_GITIGNORE=$(git config --global core.excludesFile 2>/dev/null || true)
+if [ -z "$GLOBAL_GITIGNORE" ]; then
+  GLOBAL_GITIGNORE="$HOME/.gitignore_global"
+  git config --global core.excludesFile "$GLOBAL_GITIGNORE"
+  echo "    Set core.excludesFile to $GLOBAL_GITIGNORE"
+fi
+if ! grep -qxF 'cm-findings/' "$GLOBAL_GITIGNORE" 2>/dev/null; then
+  echo 'cm-findings/' >> "$GLOBAL_GITIGNORE"
+  echo "    Added cm-findings/ to $GLOBAL_GITIGNORE"
+else
+  echo "    cm-findings/ already in $GLOBAL_GITIGNORE"
+fi
 
 echo "==> Installing Claude Code hooks..."
 mkdir -p "$HOME/.claude/hooks"
