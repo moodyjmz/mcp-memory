@@ -1,5 +1,12 @@
 # Changelog
 
+# [2.6.0](https://github.com/moodyjmz/mcp-memory/compare/v2.5.3...v2.6.0) (2026-06-26)
+
+
+### Features
+
+* **cm-findings:** add per-repo local investigation notes ([#83](https://github.com/moodyjmz/mcp-memory/issues/83)) ([ee3f3ed](https://github.com/moodyjmz/mcp-memory/commit/ee3f3ed8df48c7e923fc05bc4a76a2bdb7787b0e))
+
 ## [2.5.3](https://github.com/moodyjmz/mcp-memory/compare/v2.5.2...v2.5.3) (2026-06-25)
 
 
