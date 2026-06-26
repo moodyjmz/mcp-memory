@@ -17,7 +17,7 @@
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^12.11.1",
     "onnxruntime-node": "^1.26.0",
     "vectra": "^0.15.0"
   },
