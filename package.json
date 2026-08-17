@@ -1,6 +1,6 @@
 {
   "name": "claude-memory-mcp",
-  "version": "2.6.0",
+  "version": "2.6.3",
   "description": "MCP memory server for Claude Code — persistent, searchable codebase knowledge",
   "type": "module",
   "main": "dist/server.js",
@@ -17,17 +17,17 @@
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "better-sqlite3": "^12.10.0",
-    "onnxruntime-node": "^1.26.0",
+    "better-sqlite3": "^12.11.1",
+    "onnxruntime-node": "^1.27.0",
     "vectra": "^0.15.0"
   },
   "devDependencies": {
-    "@release-it/conventional-changelog": "^11.0.1",
+    "@release-it/conventional-changelog": "^12.0.0",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^25.9.1",
-    "@vitest/coverage-v8": "^4.1.8",
-    "release-it": "^20.2.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "release-it": "^21.0.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.10"
   }
 }
