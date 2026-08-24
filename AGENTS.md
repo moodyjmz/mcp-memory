@@ -6,7 +6,7 @@ MCP memory server for Claude Code — persistent, searchable codebase knowledge.
 
 An MCP server that gives Claude Code a persistent memory store across sessions. Memories are stored in SQLite (`~/.claude-memory/memories.db`) and indexed via Vectra (local vector index at `~/.claude-memory/index/`) using `@huggingface/transformers` for embeddings (runs locally, no API calls).
 
-It is published as `claude-memory-mcp` on npm and installed as an MCP server in Claude Code's config.
+It is installed as an MCP server in Claude Code's config via `npm run setup` (see below) — not distributed via the npm registry; `claude-memory-mcp` on npm is an unrelated package.
 
 ## Repository layout
 
@@ -96,12 +96,7 @@ The `release.yml` workflow fires on every push to `main`. It runs tests, then ca
 - Creates a git tag and GitHub release
 - Updates `CHANGELOG.md` (conventional changelog, angular preset)
 
-`npm.publish: false` in `.release-it.json` — npm publish is **not** handled by CI. After a tagged release is created, publish to npm manually:
-
-```bash
-npm run build
-npm publish
-```
+`npm.publish: false` in `.release-it.json` — this package isn't published to the npm registry at all (`claude-memory-mcp` there is an unrelated package). Installation is via `npm run setup` against a local clone; the git tag and GitHub release are the actual release artifact.
 
 ## Gotchas
 
