@@ -1,5 +1,7 @@
 # Changelog
 
+## [3.0.1](https://github.com/moodyjmz/mcp-memory/compare/v3.0.0...v3.0.1) (2026-08-24)
+
 # [3.0.0](https://github.com/moodyjmz/mcp-memory/compare/v2.6.4...v3.0.0) (2026-08-24)
 
 * fix!: derive cm-findings location from org/repo instead of hardcoding repo-root ([8146600](https://github.com/moodyjmz/mcp-memory/commit/81466002f2a69940814bf5f5bdd39a0a6ad0d998)), closes [#84](https://github.com/moodyjmz/mcp-memory/issues/84)
