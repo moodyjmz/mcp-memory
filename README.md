@@ -314,11 +314,17 @@ Then add the hook config and memory tool permissions to `~/.claude/settings.json
 
 | Hook | Event | What it does |
 |------|-------|-------------|
-| `session-start.sh` | SessionStart | Detects project from git, reminds Claude to call `memory_project_summary` |
+| `session-start.sh` | SessionStart | Detects project from git, reminds Claude to call `memory_project_summary`; reports the project's `cm-findings` location and finding count (see below) |
 | `pre-compact.sh` | PreCompact | Warns Claude to store learnings before context is compressed |
-| `session-end.sh` | SessionEnd | If no retro has been offered yet this session, prompts Claude to ask the user before closing |
+| `session-end.sh` | SessionEnd | If no retro has been offered yet this session, prompts Claude to ask the user before closing; also runs a cm-findings retro against recent commits |
 
 All hooks output colour-coded console messages (cyan/red/yellow) for visibility.
+
+### cm-findings location
+
+`session-start.sh` and `session-end.sh` both compute the same canonical location for a project's investigation notes: `~/cm-findings/<org>/<repo>/`, derived from `git remote get-url origin` (works for both SSH and HTTPS remotes). A repo with no remote yet falls back to `~/cm-findings/_local/<dirname>/`. The logic is shared via `hooks/lib/cm-findings-path.sh`, sourced by both hooks.
+
+This lives **outside** every repo on purpose — no `.gitignore` entry needed, and no per-project setup. It also means two unrelated repos that happen to share a name (e.g. two different projects both named `server`) never collide, since they're namespaced by org.
 
 ## Upgrading
 
@@ -329,6 +335,8 @@ git pull && npm run setup
 `setup.sh` builds the TypeScript, re-registers the MCP server, replaces the `~/.claude/CLAUDE.md` instructions block in-place, and merges any new tool permissions into `settings.json`. Running it again on an existing install is safe and idempotent.
 
 **Database** — no action needed. New columns (`tags`, `load_with`, etc.) are added automatically via `ALTER TABLE` migrations on first startup. Existing memories are untouched.
+
+**v3 — cm-findings moved outside the repo (breaking):** prior versions kept `cm-findings/` inside each repo's own root, gitignored. It now lives at `~/cm-findings/<org>/<repo>/` instead — this was never actually "transportable" while gitignored (it couldn't leave the machine that wrote it), and an in-repo location doesn't work for a multi-repo workspace where several checkouts share one findings pool. If you have existing `<repo>/cm-findings/` directories, migrate their contents by hand to `~/cm-findings/<org>/<repo>/` (check `git remote get-url origin` for the exact org/repo) — `session-start.sh` will flag any old-style directory it finds and remind you to move it. Re-run `npm run setup` to pick up the updated hooks and CLAUDE.md instructions; nothing in the database is affected.
 
 ## Gotchas
 
