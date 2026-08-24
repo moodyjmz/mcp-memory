@@ -32,7 +32,7 @@ Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_up
 
 **Ephemeral memory:** Use `memory_store` with `ephemeral: true` for session-scoped working state: current task spec, docker/infra topology (which image, which repo per service, volume mounts), validated commands and their git SHAs. Ephemerals appear in `session_state` at the top of `memory_project_summary` and are never evicted mid-session. Promote to long-term with `memory_update { ephemeral: false }`.
 
-**cm-findings — investigation notes:** When you discover something non-obvious during investigation (a build quirk, a deploy ordering constraint, a subtle invariant), write it to `cm-findings/<topic>.md` in the repo root immediately — do not queue it for session end. Then store a long-term MCP memory pointer: `memory_store { text: "Finding: <one-line summary>. See cm-findings/<topic>.md", file_path: "cm-findings/<topic>.md", category: "gotcha" }`. Write findings as techniques and patterns, not file:line citations — "X must happen before Y or Z breaks" is durable; "line 47 of foo.js does X" rots. The `cm-findings/` directory is git-ignored (never committed); findings accumulate across sessions as a per-repo knowledge base.
+**cm-findings — investigation notes:** When you discover something non-obvious during investigation (a build quirk, a deploy ordering constraint, a subtle invariant), write it to `<topic>.md` immediately — do not queue it for session end. It goes **outside the repo entirely**, at `~/cm-findings/<org>/<repo>/` (derived from `git remote get-url origin`; the SessionStart hook prints the exact path each session, and falls back to `~/cm-findings/_local/<dirname>` for a repo with no remote yet). Then store a long-term MCP memory pointer: `memory_store { text: "Finding: <one-line summary>. See ~/cm-findings/<org>/<repo>/<topic>.md", file_path: "~/cm-findings/<org>/<repo>/<topic>.md", category: "gotcha" }`. Write findings as techniques and patterns, not file:line citations — "X must happen before Y or Z breaks" is durable; "line 47 of foo.js does X" rots. Living outside the repo means it needs no gitignore entry and nothing to configure per-project; findings accumulate across sessions as a per-project knowledge base, namespaced by org/repo so unrelated same-named repos never collide.
 
 **Complex topology docs:** For multi-repo or docker setups too detailed for a single memory, write `.claude/<topic>.md` in the project directory (e.g. `.claude/docker-topology.md`). Store an ephemeral memory pointing to the file path. The file survives session end and ships in PRs; the ephemeral is a pointer. This lets you resurrect a setup immediately when a bug is raised later.
 
@@ -71,24 +71,11 @@ else
 fi
 rm -f "$BLOCK_FILE"
 
-echo "==> Configuring global gitignore for cm-findings/..."
-GLOBAL_GITIGNORE=$(git config --global core.excludesFile 2>/dev/null || true)
-if [ -z "$GLOBAL_GITIGNORE" ]; then
-  GLOBAL_GITIGNORE="$HOME/.gitignore_global"
-  git config --global core.excludesFile "$GLOBAL_GITIGNORE"
-  echo "    Set core.excludesFile to $GLOBAL_GITIGNORE"
-fi
-if ! grep -qxF 'cm-findings/' "$GLOBAL_GITIGNORE" 2>/dev/null; then
-  echo 'cm-findings/' >> "$GLOBAL_GITIGNORE"
-  echo "    Added cm-findings/ to $GLOBAL_GITIGNORE"
-else
-  echo "    cm-findings/ already in $GLOBAL_GITIGNORE"
-fi
-
 echo "==> Installing Claude Code hooks..."
-mkdir -p "$HOME/.claude/hooks"
+mkdir -p "$HOME/.claude/hooks/lib"
 cp "$SCRIPT_DIR/hooks/"*.sh "$HOME/.claude/hooks/"
-chmod +x "$HOME/.claude/hooks/"*.sh
+cp "$SCRIPT_DIR/hooks/lib/"*.sh "$HOME/.claude/hooks/lib/"
+chmod +x "$HOME/.claude/hooks/"*.sh "$HOME/.claude/hooks/lib/"*.sh
 echo "    Hooks copied to $HOME/.claude/hooks/"
 
 # --- Prompt user before modifying settings.json ---
