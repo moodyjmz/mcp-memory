@@ -1,5 +1,17 @@
 # Changelog
 
+# [3.0.0](https://github.com/moodyjmz/mcp-memory/compare/v2.6.4...v3.0.0) (2026-08-24)
+
+* fix!: derive cm-findings location from org/repo instead of hardcoding repo-root ([8146600](https://github.com/moodyjmz/mcp-memory/commit/81466002f2a69940814bf5f5bdd39a0a6ad0d998)), closes [#84](https://github.com/moodyjmz/mcp-memory/issues/84)
+
+### BREAKING CHANGES
+
+* cm-findings/ no longer lives inside the repo. Existing
+  per-repo cm-findings/ directories are not migrated automatically — move their
+  contents to ~/cm-findings/<org>/<repo>/ by hand, then re-run `npm run setup`
+  to pick up the updated hooks and CLAUDE.md instructions. See README.md's
+  Upgrading section.
+
 ## [2.6.4](https://github.com/moodyjmz/mcp-memory/compare/v2.6.3...v2.6.4) (2026-08-17)
 
 ## [2.6.3](https://github.com/moodyjmz/mcp-memory/compare/v2.6.2...v2.6.3) (2026-08-17)
