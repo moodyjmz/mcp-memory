@@ -12,15 +12,6 @@ export function normaliseRemoteUrl(url: string): string {
   return normalized.split('?')[0].split('#')[0];
 }
 
-/**
- * Return true only if the path targets a .md file inside a .claude/ directory.
- * Used by memory_store_file to prevent accidental writes outside reference docs.
- */
-export function isValidClaudeFilePath(filePath: string): boolean {
-  const normalised = (path.isAbsolute(filePath) ? filePath : path.resolve(filePath)).replace(/\\/g, '/');
-  return normalised.includes('/.claude/') && normalised.endsWith('.md');
-}
-
 export interface ClaudeFile {
   rel_path: string;   // e.g. ".claude/icon-migration.md"
   name: string;       // e.g. "icon-migration.md"

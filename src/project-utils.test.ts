@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { execSync } from 'child_process';
 import path from 'path';
-import { scanClaudeFiles, getRecentlyChangedFiles, isValidClaudeFilePath, normaliseRemoteUrl } from './project-utils.js';
+import { scanClaudeFiles, getRecentlyChangedFiles, normaliseRemoteUrl } from './project-utils.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -48,38 +48,6 @@ describe('normaliseRemoteUrl', () => {
 
   it('leaves a plain project name unchanged', () => {
     expect(normaliseRemoteUrl('nextcloud/office')).toBe('nextcloud/office');
-  });
-});
-
-// ─── isValidClaudeFilePath ───────────────────────────────────────────────────
-
-describe('isValidClaudeFilePath', () => {
-  it('accepts a .md file inside .claude/', () => {
-    expect(isValidClaudeFilePath('/repo/.claude/icon-migration.md')).toBe(true);
-  });
-
-  it('accepts a relative path that resolves to .claude/*.md', () => {
-    expect(isValidClaudeFilePath('.claude/notes.md')).toBe(true);
-  });
-
-  it('rejects a non-.md file inside .claude/', () => {
-    expect(isValidClaudeFilePath('/repo/.claude/settings.json')).toBe(false);
-  });
-
-  it('rejects a .md file not inside .claude/', () => {
-    expect(isValidClaudeFilePath('/repo/docs/readme.md')).toBe(false);
-  });
-
-  it('rejects a path where .claude is part of a longer directory name', () => {
-    expect(isValidClaudeFilePath('/repo/x.claude.extra/icon.md')).toBe(false);
-  });
-
-  it('rejects a file named .claude.md at repo root (not inside .claude/)', () => {
-    expect(isValidClaudeFilePath('/repo/.claude.md')).toBe(false);
-  });
-
-  it('accepts nested paths within .claude/', () => {
-    expect(isValidClaudeFilePath('/repo/.claude/sub/notes.md')).toBe(true);
   });
 });
 

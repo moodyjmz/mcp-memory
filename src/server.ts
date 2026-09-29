@@ -10,7 +10,8 @@ import { checkStaleness } from './staleness.js';
 import { getEmbedder } from './embeddings.js';
 import { CATEGORIES, DEFAULT_EVICTION_CONFIG } from './types.js';
 import type { MemoryCategory } from './types.js';
-import { scanClaudeFiles, getRecentlyChangedFiles, isValidClaudeFilePath, normaliseRemoteUrl } from './project-utils.js';
+import { scanClaudeFiles, getRecentlyChangedFiles, normaliseRemoteUrl } from './project-utils.js';
+import { NOTE_NAME_PATTERN, notesRoot, writeNote } from './notes-dir.js';
 
 function getGitSha(file_path: string): string | null {
   try {
@@ -663,55 +664,57 @@ server.registerTool('memory_project_summary', {
 // ─── memory_store_file ───────────────────────────────────────────────────────
 
 server.registerTool('memory_store_file', {
-  description: 'Atomically write a .claude/*.md reference file to disk AND store a pointer memory that links to it. Use this instead of separate Write + memory_store calls. Enforces .md extension and .claude/ directory to prevent accidental writes outside reference docs.',
+  description: 'Write a markdown notes file to the server\'s own notes folder and store a pointer memory that links to it. The file lands at <MEMORY_FILES_DIR or ~/.claude-memory/notes>/<org>/<repo>/<name>.md; it is always a new file, never an overwrite; the server builds the path, so this never writes inside a repository or Claude Code config. For files that belong in a repo, use the normal Write tool.',
   inputSchema: {
-    file_path: z.string().describe('Absolute path to the .claude/*.md file to write. Must end in .md and contain .claude/ in the path.'),
+    name: z.string().regex(NOTE_NAME_PATTERN).describe('File name without extension: lowercase letters, digits and hyphens, max 64 (e.g. "vectra-lost-writes")'),
     content: z.string().describe('Markdown content to write to the file'),
     pointer_text: z.string().describe('Memory text describing what the file contains — this is what gets searched later'),
     category: z.enum(CATEGORIES).describe('Memory category for the pointer'),
     project: z.string().optional().describe('Project identifier. Auto-detected from file_path if not given.'),
+    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given. Not the write target.'),
     pinned: z.boolean().optional().describe('Pin the pointer memory so it is never evicted'),
     tags: z.array(z.string()).optional().describe('Tags to improve search discoverability of the pointer memory'),
     load_with: z.array(z.string()).optional().describe('IDs of other memories to always surface alongside this pointer'),
     ephemeral: z.boolean().optional().describe('Mark the pointer memory as session-scoped. Use when the file itself is temporary.'),
   },
-}, async ({ file_path, content, pointer_text, category, project, pinned, tags, load_with, ephemeral }) => {
-  // Safety: only allow writes to .claude/*.md paths
-  const absPath = path.isAbsolute(file_path) ? file_path : path.resolve(file_path);
-  if (!isValidClaudeFilePath(file_path)) {
+}, async ({ name, content, pointer_text, category, project, file_path, pinned, tags, load_with, ephemeral }) => {
+  const resolvedProject = resolveProject(project, file_path);
+  if (!resolvedProject) {
     return {
       content: [{
         type: 'text' as const,
-        text: JSON.stringify({
-          written: false,
-          error: 'file_path must be under a .claude/ directory and end with .md',
-        }, null, 2),
+        text: JSON.stringify({ written: false, error: 'Could not determine the project — pass project or a file_path inside the repo' }, null, 2),
       }],
     };
   }
 
-  // Write the file
-  fs.mkdirSync(path.dirname(absPath), { recursive: true });
-  fs.writeFileSync(absPath, content, 'utf8');
+  let notePath: string;
+  try {
+    notePath = writeNote(notesRoot(), resolvedProject, name, content);
+  } catch (err) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ written: false, error: (err as Error).message }, null, 2),
+      }],
+    };
+  }
 
   // Store the pointer memory
   const db = getDefaultDb();
   const index = getDefaultIndex();
-  const resolvedProject = resolveProject(project, file_path) || undefined;
-  const storedPath = toRelativePath(file_path);
-  const git_sha = getGitSha(file_path); // null until file is committed — that's fine
   const tagsString = tags?.length ? tags.join(', ') : undefined;
   const loadWithString = load_with?.length ? load_with.join(',') : undefined;
 
   const result = await index.addFact(pointer_text, {
     category: category as MemoryCategory,
-    file_path: storedPath,
+    file_path: notePath,
     project: resolvedProject,
     tags: tagsString,
   });
 
   if (result.added) {
-    db.insertMemory(result.id, pointer_text, category as MemoryCategory, storedPath, git_sha, resolvedProject, pinned, tagsString, loadWithString, ephemeral);
+    db.insertMemory(result.id, pointer_text, category as MemoryCategory, notePath, null, resolvedProject, pinned, tagsString, loadWithString, ephemeral);
   }
 
   const evicted = await evictIfNeeded();
@@ -721,11 +724,11 @@ server.registerTool('memory_store_file', {
       type: 'text' as const,
       text: JSON.stringify({
         written: true,
-        file_path: storedPath,
+        file_path: notePath,
         memory_stored: result.added,
         memory_id: result.id,
         category,
-        project: resolvedProject || null,
+        project: resolvedProject,
         ephemeral: ephemeral || false,
         ...(result.added ? {} : { existing_memory_id: result.id, reason: 'Semantically similar memory already exists' }),
         ...(evicted > 0 ? { evicted } : {}),
