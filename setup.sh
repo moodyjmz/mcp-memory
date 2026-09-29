@@ -15,61 +15,13 @@ echo "==> Registering MCP server globally..."
 claude mcp remove memory -s user 2>/dev/null || true
 claude mcp add memory -s user "$NODE_BIN" "$SERVER_PATH"
 
-echo "==> Configuring global CLAUDE.md..."
-mkdir -p "$HOME/.claude"
-
-BLOCK_FILE=$(mktemp)
-cat > "$BLOCK_FILE" <<'BLOCK'
-
-<!-- claude-memory-mcp -->
-## Codebase Memory (MCP)
-
-Persistent memory via the `memory` MCP server. Tools: `memory_store`, `memory_update`, `memory_query`, `memory_graph`, `memory_list`, `memory_forget`, `memory_clear_ephemerals`, `repo_link`, `repo_unlink`, `repo_map`, `memory_project_summary`. Project is auto-detected from git root.
-
-**Session start (MANDATORY):** On SessionStart hook, call `memory_project_summary` (tell user "Loading project memory...") BEFORE responding. Use the project from the hook message, or auto-detect from file_path. Check `session_state` in the response first — if ephemerals exist with old timestamps (previous session), ask the user: "I have notes from a previous session — promote any or clear all?" If no ephemeral task spec exists for this project, ask: "What are we working on?" and store the answer with `ephemeral: true`. For unfamiliar projects also call `memory_graph` to get a scannable overview of all stored memories before querying.
-
-**When to store:** non-obvious architecture/conventions/gotchas, user corrections, cross-repo relationships (`repo_link`), and key learnings before context compaction. Check `repo_map` before cross-repo assumptions. Check `memory_query` before exploring unfamiliar code.
-
-**Ephemeral memory:** Use `memory_store` with `ephemeral: true` for session-scoped working state: current task spec, docker/infra topology (which image, which repo per service, volume mounts), validated commands and their git SHAs. Ephemerals appear in `session_state` at the top of `memory_project_summary` and are never evicted mid-session. Promote to long-term with `memory_update { ephemeral: false }`.
-
-**cm-findings — investigation notes:** When you discover something non-obvious during investigation (a build quirk, a deploy ordering constraint, a subtle invariant), write it to `<topic>.md` immediately — do not queue it for session end. It goes **outside the repo entirely**, at `~/cm-findings/<org>/<repo>/` (derived from `git remote get-url origin`; the SessionStart hook prints the exact path each session, and falls back to `~/cm-findings/_local/<dirname>` for a repo with no remote yet). Then store a long-term MCP memory pointer: `memory_store { text: "Finding: <one-line summary>. See ~/cm-findings/<org>/<repo>/<topic>.md", file_path: "~/cm-findings/<org>/<repo>/<topic>.md", category: "gotcha" }`. Write findings as techniques and patterns, not file:line citations — "X must happen before Y or Z breaks" is durable; "line 47 of foo.js does X" rots. Living outside the repo means it needs no gitignore entry and nothing to configure per-project; findings accumulate across sessions as a per-project knowledge base, namespaced by org/repo so unrelated same-named repos never collide.
-
-**Complex topology docs:** For multi-repo or docker setups too detailed for a single memory, write `.claude/<topic>.md` in the project directory (e.g. `.claude/docker-topology.md`). Store an ephemeral memory pointing to the file path. The file survives session end and ships in PRs; the ephemeral is a pointer. This lets you resurrect a setup immediately when a bug is raised later.
-
-**Session end:** Call `memory_project_summary` to show `session_state`. For each ephemeral, ask the user whether to promote (`memory_update { ephemeral: false }`) or clear (`memory_clear_ephemerals`). Then ask: "Anything else worth storing before we close?"
-
-**Inline updates:** If you observe something — a file, command output, test result — that contradicts or refines a stored memory, flag it in one sentence and offer to `memory_update` or `memory_forget` before continuing. Don't wait for end of session.
-
-**Task retro:** When a meaningful unit of work completes (user confirms it works, PR created, conversation pivots) and you have unstored learnings, ask once: "Worth a quick retro before we move on?" Skip if nothing substantive changed or if you've already updated memories inline this session.
-
-**How to store:** Silently, with a one-liner announcement (e.g. "Storing: LESS overrides needed for escaped string interpolation"). Always include a `tags` array that adds NEW search surface — don't repeat words from the text (already embedded). Use synonyms and related terms. Example: text "Rate limiter uses sliding window with Redis" → `tags: ["throttling", "API", "backpressure", "quota", "429"]`.
-
-**Updating memories:** Use `memory_update` to amend existing memories — add tags, set load_with, fix text — without deleting and re-creating. Use `load_with` to couple two memories that are only useful together; set it on both so they surface together.
-
-**Pinning:** Use `pinned: true` only when the user explicitly asks to remember something permanently.
-<!-- /claude-memory-mcp -->
-BLOCK
-
-if [ -f "$CLAUDE_MD" ] && grep -q "$MARKER" "$CLAUDE_MD"; then
-  # Replace existing block (handles upgrades — existing users get updated instructions)
-  python3 -c "
-import re, sys
-new_block = open(sys.argv[2]).read()
-content = open(sys.argv[1]).read()
-updated = re.sub(
-    r'\n<!-- claude-memory-mcp -->.*?<!-- /claude-memory-mcp -->',
-    new_block,
-    content,
-    flags=re.DOTALL
-)
-open(sys.argv[1], 'w').write(updated)
-" "$CLAUDE_MD" "$BLOCK_FILE"
-  echo "    Updated memory instructions in $CLAUDE_MD"
-else
-  cat "$BLOCK_FILE" >> "$CLAUDE_MD"
-  echo "    Added memory instructions to $CLAUDE_MD"
+echo "==> Removing the old memory instructions block from CLAUDE.md (if present)..."
+# Memory instructions now reach Claude Code through the server's MCP `instructions` field
+# (src/instructions.ts); earlier versions wrote them into CLAUDE.md, which every subagent loads too.
+if [ -f "$CLAUDE_MD" ]; then
+  python3 "$SCRIPT_DIR/scripts/remove-claude-md-block.py" "$CLAUDE_MD" \
+    || echo "    Remove the block between the $MARKER markers by hand."
 fi
-rm -f "$BLOCK_FILE"
 
 echo "==> Installing Claude Code hooks..."
 mkdir -p "$HOME/.claude/hooks/lib"
