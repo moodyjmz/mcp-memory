@@ -6,7 +6,9 @@ RESET='\033[0m'
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cm-findings-path.sh"
 
-PROJECT=$(git remote get-url origin 2>/dev/null | sed 's/\.git$//' | sed 's|^git@[^:]*:|https://|')
+# Must match normaliseRemoteUrl in src/project-utils.ts: the model passes this
+# string back as `project`, so any drift splits one repo across two IDs.
+PROJECT=$(git remote get-url origin 2>/dev/null | sed -E 's|\.git$||; s|^git@([^:]+):|https://\1/|; s|[?#].*$||')
 if [ -z "$PROJECT" ]; then
   PROJECT=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)
 fi
