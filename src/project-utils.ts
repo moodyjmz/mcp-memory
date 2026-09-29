@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -39,9 +39,9 @@ export function scanClaudeFiles(repoRoot: string): ClaudeFile[] {
  */
 export function getRecentlyChangedFiles(repoRoot: string, n = 20): string[] {
   try {
-    const raw = execSync(
-      `git log --name-only --format= -n ${n} HEAD`,
-      { cwd: repoRoot, encoding: 'utf8', timeout: 5000 }
+    const raw = execFileSync(
+      'git', ['log', '--name-only', '--format=', '-n', String(Math.trunc(n)), 'HEAD'],
+      { cwd: repoRoot, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
     );
     return [...new Set(raw.split('\n').map(l => l.trim()).filter(Boolean))];
   } catch {
