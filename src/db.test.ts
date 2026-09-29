@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, statSync, chmodSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
@@ -427,5 +427,30 @@ describe('ephemeral memories', () => {
     expect(ids).toHaveLength(2);
     expect(ids).toContain('n1');
     expect(ids).toContain('n2');
+  });
+});
+
+describe('data file permissions', () => {
+  it('tightens an existing data folder, db and WAL sidecars when the next process opens it', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'claude-memory-dbperm-'));
+    const dbPath = path.join(dir, 'memory.db');
+    try {
+      const first = createMemoryDb(dbPath);
+      first.insertMemory('id-1', 'fact', 'gotcha', null, null, 'p');
+      for (const f of [dir, dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+        if (existsSync(f)) chmodSync(f, f === dir ? 0o755 : 0o644);
+      }
+
+      const second = createMemoryDb(dbPath);
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      for (const f of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+        if (existsSync(f)) expect(statSync(f).mode & 0o777, f).toBe(0o600);
+      }
+      expect(existsSync(`${dbPath}-wal`)).toBe(true);
+      second.close();
+      first.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
