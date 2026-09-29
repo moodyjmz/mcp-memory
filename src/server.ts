@@ -12,6 +12,7 @@ import { CATEGORIES, DEFAULT_EVICTION_CONFIG } from './types.js';
 import type { MemoryCategory } from './types.js';
 import { scanClaudeFiles, getRecentlyChangedFiles, normaliseRemoteUrl } from './project-utils.js';
 import { NOTE_NAME_PATTERN, notesRoot, writeNote } from './notes-dir.js';
+import { LIMITS } from './limits.js';
 
 function getGitSha(file_path: string): string | null {
   try {
@@ -90,13 +91,13 @@ const server = new McpServer({
 server.registerTool('memory_store', {
   description: 'Store a fact about the codebase — architectural decisions, conventions, gotchas, preferences, or people. Deduplicates semantically similar memories.',
   inputSchema: {
-    text: z.string().describe('The fact to remember'),
+    text: z.string().max(LIMITS.text).describe('The fact to remember'),
     category: z.enum(CATEGORIES).describe('Category: architecture, convention, gotcha, decision, preference, or person (reviewer/author trust calibration — exempt from LRU eviction)'),
-    file_path: z.string().optional().describe('Related file path. Converted to relative (portable) on storage. Enables staleness detection.'),
-    project: z.string().optional().describe('Project identifier for multi-project filtering'),
+    file_path: z.string().max(LIMITS.path).optional().describe('Related file path. Converted to relative (portable) on storage. Enables staleness detection.'),
+    project: z.string().max(LIMITS.project).optional().describe('Project identifier for multi-project filtering'),
     pinned: z.boolean().optional().describe('Pin this memory so it is never evicted. Use for user-provided preferences and permanent facts.'),
-    tags: z.array(z.string()).optional().describe('Keywords/tags to improve search discoverability. These are embedded alongside the text for semantic matching.'),
-    load_with: z.array(z.string()).optional().describe('IDs of other memories that should always surface alongside this one. Use when two facts are only useful together.'),
+    tags: z.array(z.string().max(LIMITS.tag)).max(LIMITS.tags).optional().describe('Keywords/tags to improve search discoverability. These are embedded alongside the text for semantic matching.'),
+    load_with: z.array(z.string().max(LIMITS.id)).max(LIMITS.ids).optional().describe('IDs of other memories that should always surface alongside this one. Use when two facts are only useful together.'),
     ephemeral: z.boolean().optional().describe('Mark as session-scoped working state (docker topology, current task spec, validated commands). Shown at top of memory_project_summary. Cleared at session end unless promoted via memory_update.'),
   },
 }, async ({ text, category, file_path, project, pinned, tags, load_with, ephemeral }) => {
@@ -164,10 +165,10 @@ server.registerTool('memory_store', {
 server.registerTool('memory_query', {
   description: 'Search memories by semantic similarity. Returns the most relevant stored facts, with staleness flags for file-linked memories. Also returns also_relevant: memories sharing tags with the results but not semantically close enough to rank — these are often causally related facts you should read alongside the main results. also_relevant is only populated when a project is known (via project or file_path).',
   inputSchema: {
-    text: z.string().describe('What to search for'),
-    topK: z.number().optional().describe('Number of results to return (default 5)'),
-    project: z.string().optional().describe('Filter results to a specific project'),
-    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given'),
+    text: z.string().max(LIMITS.text).describe('What to search for'),
+    topK: z.number().int().min(1).max(LIMITS.topK).optional().describe('Number of results to return (default 5)'),
+    project: z.string().max(LIMITS.project).optional().describe('Filter results to a specific project'),
+    file_path: z.string().max(LIMITS.path).optional().describe('A file in the project — used to auto-detect project if project is not given'),
   },
 }, async ({ text, topK, project, file_path }) => {
   const db = getDefaultDb();
@@ -248,7 +249,7 @@ server.registerTool('memory_list', {
   description: 'List stored memories, optionally filtered by category and/or project. No staleness check (use memory_query for that).',
   inputSchema: {
     category: z.enum(CATEGORIES).optional().describe('Filter by category'),
-    project: z.string().optional().describe('Filter by project'),
+    project: z.string().max(LIMITS.project).optional().describe('Filter by project'),
   },
 }, async ({ category, project }) => {
   const db = getDefaultDb();
@@ -267,13 +268,13 @@ server.registerTool('memory_list', {
 server.registerTool('memory_update', {
   description: 'Amend an existing memory — update text, tags, category, file_path, pinned, ephemeral, or load_with without deleting and re-creating. If text or tags change the vector is re-embedded automatically. Use ephemeral: false to promote a session-scoped memory to long-term.',
   inputSchema: {
-    id: z.string().describe('The memory ID to update'),
-    text: z.string().optional().describe('New text (triggers re-embedding)'),
+    id: z.string().max(LIMITS.id).describe('The memory ID to update'),
+    text: z.string().max(LIMITS.text).optional().describe('New text (triggers re-embedding)'),
     category: z.enum(CATEGORIES).optional().describe('New category'),
-    file_path: z.string().nullable().optional().describe('New file path (null to clear)'),
-    tags: z.array(z.string()).nullable().optional().describe('Replace tags (null to clear)'),
+    file_path: z.string().max(LIMITS.path).nullable().optional().describe('New file path (null to clear)'),
+    tags: z.array(z.string().max(LIMITS.tag)).max(LIMITS.tags).nullable().optional().describe('Replace tags (null to clear)'),
     pinned: z.boolean().optional().describe('Set pinned status'),
-    load_with: z.array(z.string()).nullable().optional().describe('Replace load_with IDs (null to clear). IDs of memories that should always surface alongside this one.'),
+    load_with: z.array(z.string().max(LIMITS.id)).max(LIMITS.ids).nullable().optional().describe('Replace load_with IDs (null to clear). IDs of memories that should always surface alongside this one.'),
     ephemeral: z.boolean().optional().describe('Set to false to promote a session-scoped memory to long-term permanent storage.'),
   },
 }, async ({ id, text, category, file_path, tags, pinned, load_with, ephemeral }) => {
@@ -346,7 +347,7 @@ server.registerTool('memory_update', {
 server.registerTool('memory_forget', {
   description: 'Remove a memory by ID from both vector index and database.',
   inputSchema: {
-    id: z.string().describe('The memory ID to remove'),
+    id: z.string().max(LIMITS.id).describe('The memory ID to remove'),
   },
 }, async ({ id }) => {
   const db = getDefaultDb();
@@ -378,8 +379,8 @@ server.registerTool('memory_forget', {
 server.registerTool('memory_clear_ephemerals', {
   description: 'Clear all session-scoped (ephemeral) memories for a project. Use at session end after reviewing which to promote. Removes from both vector index and database.',
   inputSchema: {
-    project: z.string().min(1).optional().describe('Project identifier — only ephemerals for this project are cleared'),
-    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given'),
+    project: z.string().max(LIMITS.project).min(1).optional().describe('Project identifier — only ephemerals for this project are cleared'),
+    file_path: z.string().max(LIMITS.path).optional().describe('A file in the project — used to auto-detect project if project is not given'),
   },
 }, async ({ project, file_path }) => {
   const db = getDefaultDb();
@@ -420,8 +421,8 @@ server.registerTool('memory_clear_ephemerals', {
 server.registerTool('memory_graph', {
   description: 'Compact table-of-contents view of all memories for a project — IDs, short excerpts, tags, and category grouped together. Use at session start to see what exists before querying. Much lighter than memory_list.',
   inputSchema: {
-    project: z.string().optional().describe('Project identifier. Auto-detected from file_path if not given.'),
-    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given.'),
+    project: z.string().max(LIMITS.project).optional().describe('Project identifier. Auto-detected from file_path if not given.'),
+    file_path: z.string().max(LIMITS.path).optional().describe('A file in the project — used to auto-detect project if project is not given.'),
   },
 }, async ({ project, file_path }) => {
   const db = getDefaultDb();
@@ -477,11 +478,11 @@ server.registerTool('memory_graph', {
 server.registerTool('repo_link', {
   description: 'Record a cross-repo relationship — how one project provides, consumes, or depends on another. E.g. "core-lib provides shared types consumed by frontend".',
   inputSchema: {
-    source: z.string().describe('Source project name (the provider)'),
-    target: z.string().describe('Target project name (the consumer)'),
+    source: z.string().max(LIMITS.project).describe('Source project name (the provider)'),
+    target: z.string().max(LIMITS.project).describe('Target project name (the consumer)'),
     relationship_type: z.enum(['provides', 'consumes', 'depends_on', 'builds_from', 'extends']).describe('Type of relationship'),
-    description: z.string().describe('What is provided/consumed/shared — be specific'),
-    file_path: z.string().optional().describe('File where the relationship is visible (e.g. the import or config)'),
+    description: z.string().max(LIMITS.text).describe('What is provided/consumed/shared — be specific'),
+    file_path: z.string().max(LIMITS.path).optional().describe('File where the relationship is visible (e.g. the import or config)'),
   },
 }, async ({ source, target, relationship_type, description, file_path }) => {
   const db = getDefaultDb();
@@ -519,7 +520,7 @@ server.registerTool('repo_unlink', {
 server.registerTool('repo_map', {
   description: 'Show all known cross-repo relationships, optionally filtered by project. Returns how repos connect: what provides what, what depends on what.',
   inputSchema: {
-    project: z.string().optional().describe('Filter to relationships involving this project'),
+    project: z.string().max(LIMITS.project).optional().describe('Filter to relationships involving this project'),
   },
 }, async ({ project }) => {
   const db = getDefaultDb();
@@ -540,8 +541,8 @@ server.registerTool('repo_map', {
 server.registerTool('memory_project_summary', {
   description: 'Lightweight project overview for session start: category counts, pinned memories, repo relationships, recently useful memories (by last access), and recently added memories (by creation date). Does NOT return all memories.',
   inputSchema: {
-    project: z.string().optional().describe('Project identifier. Auto-detected from file_path if not given.'),
-    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given.'),
+    project: z.string().max(LIMITS.project).optional().describe('Project identifier. Auto-detected from file_path if not given.'),
+    file_path: z.string().max(LIMITS.path).optional().describe('A file in the project — used to auto-detect project if project is not given.'),
   },
 }, async ({ project, file_path }) => {
   const db = getDefaultDb();
@@ -667,14 +668,14 @@ server.registerTool('memory_store_file', {
   description: 'Write a markdown notes file to the server\'s own notes folder and store a pointer memory that links to it. The file lands at <MEMORY_FILES_DIR or ~/.claude-memory/notes>/<org>/<repo>/<name>.md; it is always a new file, never an overwrite; the server builds the path, so this never writes inside a repository or Claude Code config. For files that belong in a repo, use the normal Write tool.',
   inputSchema: {
     name: z.string().regex(NOTE_NAME_PATTERN).describe('File name without extension: lowercase letters, digits and hyphens, max 64 (e.g. "vectra-lost-writes")'),
-    content: z.string().describe('Markdown content to write to the file'),
-    pointer_text: z.string().describe('Memory text describing what the file contains — this is what gets searched later'),
+    content: z.string().max(LIMITS.content).refine(c => Buffer.byteLength(c, 'utf8') <= LIMITS.content, 'content exceeds 512 KiB').describe('Markdown content to write to the file (max 512 KiB)'),
+    pointer_text: z.string().max(LIMITS.text).describe('Memory text describing what the file contains — this is what gets searched later'),
     category: z.enum(CATEGORIES).describe('Memory category for the pointer'),
-    project: z.string().optional().describe('Project identifier. Auto-detected from file_path if not given.'),
-    file_path: z.string().optional().describe('A file in the project — used to auto-detect project if project is not given. Not the write target.'),
+    project: z.string().max(LIMITS.project).optional().describe('Project identifier. Auto-detected from file_path if not given.'),
+    file_path: z.string().max(LIMITS.path).optional().describe('A file in the project — used to auto-detect project if project is not given. Not the write target.'),
     pinned: z.boolean().optional().describe('Pin the pointer memory so it is never evicted'),
-    tags: z.array(z.string()).optional().describe('Tags to improve search discoverability of the pointer memory'),
-    load_with: z.array(z.string()).optional().describe('IDs of other memories to always surface alongside this pointer'),
+    tags: z.array(z.string().max(LIMITS.tag)).max(LIMITS.tags).optional().describe('Tags to improve search discoverability of the pointer memory'),
+    load_with: z.array(z.string().max(LIMITS.id)).max(LIMITS.ids).optional().describe('IDs of other memories to always surface alongside this pointer'),
     ephemeral: z.boolean().optional().describe('Mark the pointer memory as session-scoped. Use when the file itself is temporary.'),
   },
 }, async ({ name, content, pointer_text, category, project, file_path, pinned, tags, load_with, ephemeral }) => {
