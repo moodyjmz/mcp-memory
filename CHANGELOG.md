@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.2](https://github.com/moodyjmz/mcp-memory/compare/v3.0.1...v3.0.2) (2026-09-29)
+
+### Bug Fixes
+
+* 🐛 keep the host when the session-start hook normalises SSH remotes ([aff18a5](https://github.com/moodyjmz/mcp-memory/commit/aff18a5483a73067beb56142f8e11eb03efbeb71))
+* 🐛 normalise explicitly passed project IDs ([5f5b255](https://github.com/moodyjmz/mcp-memory/commit/5f5b255387e78546c94cccb10783d2794cac9308))
+
 ## [3.0.1](https://github.com/moodyjmz/mcp-memory/compare/v3.0.0...v3.0.1) (2026-08-24)
 
 # [3.0.0](https://github.com/moodyjmz/mcp-memory/compare/v2.6.4...v3.0.0) (2026-08-24)
