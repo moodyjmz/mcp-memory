@@ -504,7 +504,7 @@ server.registerTool('repo_link', {
 server.registerTool('repo_unlink', {
   description: 'Remove a cross-repo relationship by ID.',
   inputSchema: {
-    id: z.number().describe('The relationship ID to remove'),
+    id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).describe('The relationship ID to remove'),
   },
 }, async ({ id }) => {
   const db = getDefaultDb();
