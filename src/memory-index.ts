@@ -3,6 +3,7 @@ import type { MetadataFilter } from 'vectra';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+import { restrictToOwner } from './permissions.js';
 import { embed as defaultEmbed } from './embeddings.js';
 import type { MemoryMetadata, AddFactResult, QueryFactResult } from './types.js';
 
@@ -23,11 +24,12 @@ export function createMemoryIndex(
 
   async function getIndex(): Promise<LocalIndex<MemoryMetadata>> {
     if (index) return index;
-    fs.mkdirSync(indexPath, { recursive: true });
+    fs.mkdirSync(indexPath, { recursive: true, mode: 0o700 });
     index = new LocalIndex<MemoryMetadata>(indexPath);
     if (!await index.isIndexCreated()) {
       await index.createIndex();
     }
+    restrictToOwner(indexPath, [path.join(indexPath, 'index.json')]);
     return index;
   }
 

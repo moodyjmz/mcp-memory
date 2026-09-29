@@ -740,6 +740,8 @@ server.registerTool('memory_store_file', {
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  // Anything the server creates (db sidecars, index, notes) is owner-only from the start
+  process.umask(0o077);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('claude-memory MCP server running on stdio');

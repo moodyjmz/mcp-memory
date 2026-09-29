@@ -3,6 +3,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+import { restrictToOwner } from './permissions.js';
 import type { MemoryRow, MemoryCategory, EvictionConfig } from './types.js';
 import { EVICTION_EXEMPT_CATEGORIES } from './types.js';
 
@@ -52,9 +53,9 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   const db: BetterSqlite3.Database = new Database(dbPath);
-  // Restrict DB file to owner-only after creation (no-op if already exists with correct perms)
-  try { fs.chmodSync(dbPath, 0o600); } catch { /* ignore on unsupported filesystems */ }
   db.pragma('journal_mode = WAL');
+  // SQLite gives new -wal/-shm files the db file's mode, but existing ones keep theirs
+  restrictToOwner(dir, [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS memories (
