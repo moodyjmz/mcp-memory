@@ -15,7 +15,10 @@ function chmodIfPresent(target: string, mode: number): void {
     fs.chmodSync(target, mode);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    // Missing sidecar files and filesystems without POSIX modes are fine
-    if (code !== 'ENOENT' && code !== 'EPERM' && code !== 'ENOTSUP') throw err;
+    // Missing sidecar files are expected. Anything else (read-only mount, no POSIX
+    // modes) must not stop the server, but the owner should hear about it.
+    if (code !== 'ENOENT') {
+      console.error(`claude-memory: could not restrict ${target} to owner-only (${code ?? (err as Error).message})`);
+    }
   }
 }
