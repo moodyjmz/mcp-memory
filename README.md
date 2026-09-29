@@ -37,6 +37,7 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 | `repo_unlink` | Remove a cross-repo relationship by ID. |
 | `repo_map` | Show all known cross-repo relationships, optionally filtered by project. |
 | `memory_project_summary` | Lightweight project overview for session start: category counts, pinned memories, repo relationships, `recently_useful` (top 5 by last access — what was helpful before), and `recently_added` (top 5 by creation date — what's new). Full text via `memory_query`. |
+| `memory_store_file` | Write a markdown notes file and store a pointer memory to it. Takes a `name`; the server creates `<MEMORY_FILES_DIR or ~/.claude-memory/notes>/<org>/<repo>/<name>.md` and never writes inside repositories or Claude Code config. |
 
 ### Categories
 
@@ -120,6 +121,12 @@ The markdown file ships in PRs, survives session end, and lets you resurrect the
 Memories are automatically evicted when the count exceeds `maxMemories` (default 2000). Least-recently-accessed memories are removed first. **Pinned memories are never evicted** — use `pinned: true` on `memory_store` for permanent facts and user preferences. Configure via environment variable:
 
 - `MEMORY_MAX_COUNT` — max stored memories (default 2000)
+
+### Notes folder
+
+`memory_store_file` creates notes at `~/.claude-memory/notes/<org>/<repo>/<name>.md`, a folder only the server writes to. A project without an org goes under `_local/<name>/`. Set `MEMORY_FILES_DIR` to use a different root, e.g. `~/cm-findings`. Be aware that the caller chooses the project, so a tool call can then create new files in any `<org>/<repo>` folder under that root.
+
+cm-findings written by Claude with its own Write tool (plus a `memory_store` pointer) is unaffected. That path goes through Claude Code's permission rules and diff view.
 
 ### Project Scoping
 
@@ -245,7 +252,15 @@ Before any stored `git_sha` is used as a git revision, `staleness.ts` validates 
 
 ### Data directory permissions
 
-`~/.claude-memory/` is created with mode `0700` and `memory.db` is set to `0600` at creation time, so memories are readable only by the owning user. Memories can contain sensitive context about codebases and personal workflows, so they should not be world-readable.
+On every start the server sets `umask 077` and chmods `~/.claude-memory/` to `0700`, and `memory.db`, its `-wal`/`-shm` sidecars and the vector index to `0600`. This means installs created before a fix are tightened too. Memories can contain sensitive context about codebases and personal workflows, so they must not be readable by other local accounts. Notes written by `memory_store_file` are `0600`, in folders created `0700`.
+
+### File writes
+
+`memory_store_file` is the only tool that writes files. The caller passes a `name` (`^[a-z0-9][a-z0-9-]{0,63}$`), never a path. The server builds the path under the notes root, refuses a folder that resolves outside the root through a symlink, and only ever creates new files: an existing note (including a differently-cased one on a case-insensitive filesystem, or a symlink) is never overwritten, and the call fails with "already exists, choose another name". Tool-initiated writes never land in a repository or in Claude Code's config, where they would become instructions for later sessions. Files that belong in a repo should be written with Claude Code's own Write tool, where its permission rules and diff view apply.
+
+### Input limits
+
+Every string and array argument has an upper bound (`src/limits.ts`): text 8,000 characters, notes content 512 KiB, 32 tags of 64 characters, 32 `load_with` IDs, and `topK` 1-50. Oversized input is rejected, not truncated. `src/limits.test.ts` fails if a tool gains an unbounded argument.
 
 ## Dependencies
 
@@ -334,6 +349,8 @@ git pull && npm run setup
 `setup.sh` builds the TypeScript, re-registers the MCP server, replaces the `~/.claude/CLAUDE.md` instructions block in-place, and merges any new tool permissions into `settings.json`. Running it again on an existing install is safe and idempotent.
 
 **Database** — no action needed. New columns (`tags`, `load_with`, etc.) are added automatically via `ALTER TABLE` migrations on first startup. Existing memories are untouched.
+
+**v4: `memory_store_file` takes `name` instead of `file_path` (breaking).** It used to write to a caller-chosen `.claude/*.md` path. It now creates `~/.claude-memory/notes/<org>/<repo>/<name>.md` (see `MEMORY_FILES_DIR`), never overwrites, and `file_path` is only a hint for detecting the project. Callers passing the old `file_path`-only form get a schema error. Files written by older versions stay where they are.
 
 **v3 — cm-findings moved outside the repo (breaking):** prior versions kept `cm-findings/` inside each repo's own root, gitignored. It now lives at `~/cm-findings/<org>/<repo>/` instead — this was never actually "transportable" while gitignored (it couldn't leave the machine that wrote it), and an in-repo location doesn't work for a multi-repo workspace where several checkouts share one findings pool. If you have existing `<repo>/cm-findings/` directories, migrate their contents by hand to `~/cm-findings/<org>/<repo>/` (check `git remote get-url origin` for the exact org/repo) — `session-start.sh` will flag any old-style directory it finds and remind you to move it. Re-run `npm run setup` to pick up the updated hooks and CLAUDE.md instructions; nothing in the database is affected.
 

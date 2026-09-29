@@ -18,6 +18,9 @@ It is installed as an MCP server in Claude Code's config via `npm run setup` (se
 | `src/embeddings.ts` | HuggingFace transformer embeddings (local). Model: `Xenova/all-MiniLM-L6-v2`. |
 | `src/staleness.ts` | Git-based staleness detection for file-linked memories. |
 | `src/project-utils.ts` | Git root detection, `.claude/` file scanning, recently changed files. |
+| `src/notes-dir.ts` | Server-built paths and safe writes for `memory_store_file` notes. |
+| `src/permissions.ts` | Reapplies owner-only modes to the data folder and files on every start. |
+| `src/limits.ts` | Upper bounds for every tool argument. |
 | `src/types.ts` | Shared types: `CATEGORIES`, `EVICTION_EXEMPT_CATEGORIES`, `MemoryRow`, etc. |
 | `build/` | Grunt build (not the SDK build — see below). |
 | `dist/` | Compiled output (`tsc`). Never hand-edit. |
@@ -27,7 +30,7 @@ It is installed as an MCP server in Claude Code's config via `npm run setup` (se
 ```bash
 npm ci --legacy-peer-deps   # install deps (always use ci, not install)
 npm run build               # tsc → dist/
-npm test                    # vitest run (96 tests)
+npm test                    # vitest run
 npm run test:watch          # vitest watch mode
 ```
 
