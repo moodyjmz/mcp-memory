@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { getDefaultIndex } from './memory-index.js';
 import { getDefaultDb } from './db.js';
+import { SERVER_INSTRUCTIONS } from './instructions.js';
 import { checkStaleness } from './staleness.js';
 import { getEmbedder } from './embeddings.js';
 import { CATEGORIES, DEFAULT_EVICTION_CONFIG } from './types.js';
@@ -82,6 +83,8 @@ async function evictIfNeeded(): Promise<number> {
 const server = new McpServer({
   name: 'claude-memory',
   version: '2.0.0',
+}, {
+  instructions: SERVER_INSTRUCTIONS,
 });
 
 // ─── memory_store ────────────────────────────────────────────────────────────
