@@ -3,6 +3,16 @@ import fs from 'fs';
 import path from 'path';
 
 /**
+ * Canonical project ID for a git remote URL: strip a trailing .git, rewrite
+ * SSH (git@host:org/repo) to HTTPS form keeping the host, and drop any query
+ * string or fragment so a crafted remote can't spoof another project's ID.
+ */
+export function normaliseRemoteUrl(url: string): string {
+  const normalized = url.trim().replace(/\.git$/, '').replace(/^git@([^:]+):/, 'https://$1/');
+  return normalized.split('?')[0].split('#')[0];
+}
+
+/**
  * Return true only if the path targets a .md file inside a .claude/ directory.
  * Used by memory_store_file to prevent accidental writes outside reference docs.
  */
