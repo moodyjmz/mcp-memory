@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { execSync } from 'child_process';
 import path from 'path';
-import { scanClaudeFiles, getRecentlyChangedFiles, isValidClaudeFilePath } from './project-utils.js';
+import { scanClaudeFiles, getRecentlyChangedFiles, isValidClaudeFilePath, normaliseRemoteUrl } from './project-utils.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -26,6 +26,30 @@ function gitCommit(dir: string, files: Record<string, string>, message: string):
   }
   execSync(`git commit -m "${message}"`, { cwd: dir, stdio: 'pipe' });
 }
+
+// ─── normaliseRemoteUrl ──────────────────────────────────────────────────────
+
+describe('normaliseRemoteUrl', () => {
+  it('rewrites an SSH remote to HTTPS form, keeping the host', () => {
+    expect(normaliseRemoteUrl('git@github.com:Euro-Office/web-apps.git')).toBe('https://github.com/Euro-Office/web-apps');
+  });
+
+  it('gives SSH and HTTPS remotes of the same repo the same ID', () => {
+    expect(normaliseRemoteUrl('git@github.com:org/repo.git')).toBe(normaliseRemoteUrl('https://github.com/org/repo.git'));
+  });
+
+  it('keeps non-GitHub hosts', () => {
+    expect(normaliseRemoteUrl('git@gitlab.example.com:group/repo.git')).toBe('https://gitlab.example.com/group/repo');
+  });
+
+  it('strips query strings and fragments', () => {
+    expect(normaliseRemoteUrl('https://github.com/org/repo?x=1#y')).toBe('https://github.com/org/repo');
+  });
+
+  it('leaves a plain project name unchanged', () => {
+    expect(normaliseRemoteUrl('nextcloud/office')).toBe('nextcloud/office');
+  });
+});
 
 // ─── isValidClaudeFilePath ───────────────────────────────────────────────────
 
