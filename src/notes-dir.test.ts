@@ -31,6 +31,10 @@ describe('notesRoot', () => {
     expect(notesRoot({ MEMORY_FILES_DIR: '/srv/notes' })).toBe('/srv/notes');
   });
 
+  it('rejects a relative MEMORY_FILES_DIR', () => {
+    expect(() => notesRoot({ MEMORY_FILES_DIR: 'relative/notes' })).toThrow(/absolute/);
+  });
+
   it('defaults to ~/.claude-memory/notes', () => {
     expect(notesRoot({})).toBe(path.join(homedir(), '.claude-memory', 'notes'));
   });

@@ -14,7 +14,12 @@ export const NOTE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 export function notesRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return path.resolve(env.MEMORY_FILES_DIR || path.join(os.homedir(), '.claude-memory', 'notes'));
+  const configured = env.MEMORY_FILES_DIR;
+  if (configured && !path.isAbsolute(configured)) {
+    // A relative root would resolve against whichever repo the session started in
+    throw new Error(`MEMORY_FILES_DIR must be an absolute path, got "${configured}"`);
+  }
+  return path.resolve(configured || path.join(os.homedir(), '.claude-memory', 'notes'));
 }
 
 /**
