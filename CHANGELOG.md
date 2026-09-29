@@ -1,5 +1,11 @@
 # Changelog
 
+# [3.1.0](https://github.com/moodyjmz/mcp-memory/compare/v3.0.2...v3.1.0) (2026-09-29)
+
+### Features
+
+* ✨ serve memory-use instructions through the MCP instructions field ([dd05e3b](https://github.com/moodyjmz/mcp-memory/commit/dd05e3b320d9bc6fb81861445de060573b959313)), closes [#112](https://github.com/moodyjmz/mcp-memory/issues/112)
+
 ## [3.0.2](https://github.com/moodyjmz/mcp-memory/compare/v3.0.1...v3.0.2) (2026-09-29)
 
 ### Bug Fixes
