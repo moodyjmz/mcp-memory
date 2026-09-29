@@ -43,6 +43,13 @@ function getGitRemote(file_path: string): string | null {
   }
 }
 
+// An explicit project wins over file_path detection, but is normalised the same
+// way so an SSH-form or .git-suffixed ID can't split one repo across two IDs.
+function resolveProject(project: string | undefined, file_path: string | undefined): string | null {
+  if (project) return normaliseRemoteUrl(project);
+  return file_path ? getProjectId(file_path) : null;
+}
+
 function toRelativePath(file_path: string): string {
   const root = getGitRootPath(file_path);
   if (!root) return file_path;
@@ -96,7 +103,7 @@ server.registerTool('memory_store', {
   const index = getDefaultIndex();
 
   // Auto-detect project from git remote URL if not provided
-  const resolvedProject = project || (file_path ? getProjectId(file_path) : null) || undefined;
+  const resolvedProject = resolveProject(project, file_path) || undefined;
   const git_sha = file_path ? getGitSha(file_path) : null;
   // Store relative path (portable across machines). Note: staleness detection resolves
   // relative paths against process.cwd() of the MCP server, so it only reliably fires
@@ -166,7 +173,7 @@ server.registerTool('memory_query', {
   const index = getDefaultIndex();
 
   // Auto-detect project from file_path if not explicitly provided (mirrors memory_store behaviour)
-  const resolvedProject = project || (file_path ? getProjectId(file_path) : null) || undefined;
+  const resolvedProject = resolveProject(project, file_path) || undefined;
 
   const results = await index.queryFacts(text, topK || 5, resolvedProject);
 
@@ -244,7 +251,7 @@ server.registerTool('memory_list', {
   },
 }, async ({ category, project }) => {
   const db = getDefaultDb();
-  const rows = db.listMemories(category as MemoryCategory | undefined, project);
+  const rows = db.listMemories(category as MemoryCategory | undefined, project ? normaliseRemoteUrl(project) : undefined);
 
   return {
     content: [{
@@ -377,7 +384,7 @@ server.registerTool('memory_clear_ephemerals', {
   const db = getDefaultDb();
   const index = getDefaultIndex();
 
-  const resolvedProject = project || (file_path ? getProjectId(file_path) : null);
+  const resolvedProject = resolveProject(project, file_path);
   if (!resolvedProject) {
     return {
       content: [{
@@ -418,7 +425,7 @@ server.registerTool('memory_graph', {
 }, async ({ project, file_path }) => {
   const db = getDefaultDb();
 
-  const resolvedProject = project || (file_path ? getProjectId(file_path) : null) || undefined;
+  const resolvedProject = resolveProject(project, file_path) || undefined;
   if (!resolvedProject) {
     return {
       content: [{
@@ -538,7 +545,7 @@ server.registerTool('memory_project_summary', {
 }, async ({ project, file_path }) => {
   const db = getDefaultDb();
 
-  const resolvedProject = project || (file_path ? getProjectId(file_path) : null) || undefined;
+  const resolvedProject = resolveProject(project, file_path) || undefined;
   if (!resolvedProject) {
     return {
       content: [{
@@ -690,7 +697,7 @@ server.registerTool('memory_store_file', {
   // Store the pointer memory
   const db = getDefaultDb();
   const index = getDefaultIndex();
-  const resolvedProject = project || getProjectId(file_path) || undefined;
+  const resolvedProject = resolveProject(project, file_path) || undefined;
   const storedPath = toRelativePath(file_path);
   const git_sha = getGitSha(file_path); // null until file is committed — that's fine
   const tagsString = tags?.length ? tags.join(', ') : undefined;
