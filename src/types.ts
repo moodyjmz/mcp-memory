@@ -9,16 +9,27 @@ export const EVICTION_EXEMPT_CATEGORIES: ReadonlySet<string> = new Set(['person'
 
 export type MemoryCategory = typeof CATEGORIES[number];
 
-// Vectra requires Record<string, MetadataTypes> where MetadataTypes = string | number | boolean.
-// Optional fields are stored as empty strings when absent, not undefined.
-export interface MemoryMetadata {
-  [key: string]: string | number | boolean;
+export interface NewMemory {
   text: string;
   category: MemoryCategory;
-  file_path: string;
-  project: string;
-  tags: string; // comma-separated tags for search enrichment
+  file_path?: string | null;
+  git_sha?: string | null;
+  project?: string | null;
+  pinned?: boolean;
+  tags?: string | null; // comma-separated
+  load_with?: string | null; // comma-separated IDs
+  ephemeral?: boolean;
 }
+
+/** A vector and the exact string it was embedded from (see embedSource). */
+export interface Embedded {
+  vector: ArrayLike<number>;
+  source: string;
+}
+
+export type StoreResult =
+  | { stored: true; id: string; evicted: number }
+  | { stored: false; id: string; existing: string };
 
 export interface MemoryRow {
   id: string;
@@ -39,19 +50,6 @@ export interface StalenessResult {
   stale: boolean;
   reason?: string;
   commits_since?: number;
-}
-
-export interface AddFactResult {
-  added: boolean;
-  id: string;
-  existing?: string;
-}
-
-export interface QueryFactResult {
-  id: string;
-  text: string;
-  category: string;
-  score: number;
 }
 
 export interface EvictionConfig {

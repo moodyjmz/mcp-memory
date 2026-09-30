@@ -7,8 +7,8 @@ import type { MemoryIndex } from './memory-index.js';
 import type { MemoryDb } from './db.js';
 import { SERVER_INSTRUCTIONS } from './instructions.js';
 import { checkStaleness } from './staleness.js';
-import { CATEGORIES, DEFAULT_EVICTION_CONFIG } from './types.js';
-import type { MemoryCategory, EvictionConfig } from './types.js';
+import { CATEGORIES } from './types.js';
+import type { MemoryCategory } from './types.js';
 import { scanClaudeFiles, getRecentlyChangedFiles, normaliseRemoteUrl } from './project-utils.js';
 import { NOTE_NAME_PATTERN, notesRoot, writeNote } from './notes-dir.js';
 import { LIMITS } from './limits.js';
@@ -70,22 +70,10 @@ function getProjectId(file_path: string): string | null {
 export interface ServerDeps {
   db: MemoryDb;
   index: MemoryIndex;
-  eviction?: EvictionConfig;
   notesRoot?: () => string;
 }
 
-export function createServer({ db, index, eviction = DEFAULT_EVICTION_CONFIG, notesRoot: getNotesRoot = notesRoot }: ServerDeps): McpServer {
-  async function evictIfNeeded(): Promise<number> {
-    const ids = db.getEvictableIds(eviction);
-
-    for (const id of ids) {
-      try { await index.deleteFact(id); } catch { /* already gone from index */ }
-      db.deleteMemory(id);
-    }
-
-    return ids.length;
-  }
-
+export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }: ServerDeps): McpServer {
   const server = new McpServer({
     name: 'claude-memory',
     version: '2.0.0',
@@ -119,14 +107,19 @@ export function createServer({ db, index, eviction = DEFAULT_EVICTION_CONFIG, no
     const tagsString = tags?.length ? tags.join(', ') : undefined;
     const loadWithString = load_with?.length ? load_with.join(',') : undefined;
 
-    const result = await index.addFact(text, {
+    const result = await index.addFact({
+      text,
       category: category as MemoryCategory,
       file_path: storedPath,
+      git_sha,
       project: resolvedProject,
+      pinned,
       tags: tagsString,
+      load_with: loadWithString,
+      ephemeral,
     });
 
-    if (!result.added) {
+    if (!result.stored) {
       return {
         content: [{
           type: 'text' as const,
@@ -140,10 +133,7 @@ export function createServer({ db, index, eviction = DEFAULT_EVICTION_CONFIG, no
       };
     }
 
-    db.insertMemory(result.id, text, category as MemoryCategory, storedPath, git_sha, resolvedProject, pinned, tagsString, loadWithString, ephemeral);
-
-    // Evict old memories if over limit
-    const evicted = await evictIfNeeded();
+    const evicted = result.evicted;
 
     return {
       content: [{
@@ -185,24 +175,26 @@ export function createServer({ db, index, eviction = DEFAULT_EVICTION_CONFIG, no
     const ids = results.map(r => r.id);
     db.updateLastAccessed(ids);
 
-    const enriched = results.map(r => {
+    const enriched = results.flatMap(r => {
+      // Another session can forget a memory between the search and this read
       const row = db.getMemory(r.id);
-      const staleness = row ? checkStaleness(row.file_path, row.git_sha) : { stale: false };
+      if (!row) return [];
+      const staleness = checkStaleness(row.file_path, row.git_sha);
 
-      return {
+      return [{
         id: r.id,
-        text: row?.text ?? r.text,         // SQL is authoritative (survives memory_update)
-        category: row?.category ?? r.category,
+        text: row.text,
+        category: row.category,
         score: Math.round(r.score * 1000) / 1000,
-        file_path: row?.file_path || null,
-        project: row?.project || null,
-        date: row?.created_at || null,
-        tags: row?.tags || null,
-        load_with: row?.load_with ? row.load_with.split(',').map(s => s.trim()) : null,
+        file_path: row.file_path || null,
+        project: row.project || null,
+        date: row.created_at,
+        tags: row.tags || null,
+        load_with: row.load_with ? row.load_with.split(',').map(s => s.trim()) : null,
         stale: staleness.stale,
         ...(staleness.commits_since ? { commits_since: staleness.commits_since } : {}),
         ...(staleness.reason ? { stale_reason: staleness.reason } : {}),
-      };
+      }];
     });
 
     // Tag-based also_relevant: memories sharing tags with results but not already returned.
@@ -290,29 +282,15 @@ export function createServer({ db, index, eviction = DEFAULT_EVICTION_CONFIG, no
       };
     }
 
-    const newText = text ?? existing.text;
     const newTags = tags !== undefined
       ? (tags === null ? null : tags.join(', '))
       : existing.tags;
-
-    // Re-embed if text or tags changed
-    const textChanged = text !== undefined && text !== existing.text;
-    const tagsChanged = tags !== undefined && (tags === null ? existing.tags !== null : tags.join(', ') !== existing.tags);
-
-    if (textChanged || tagsChanged) {
-      await index.updateFact(id, newText, {
-        category: (category ?? existing.category) as string,
-        file_path: file_path !== undefined ? (file_path ?? undefined) : (existing.file_path ?? undefined),
-        project: existing.project ?? undefined,
-        tags: newTags ?? undefined,
-      });
-    }
 
     const loadWithString = load_with !== undefined
       ? (load_with === null ? null : load_with.join(','))
       : undefined;
 
-    db.updateMemory(id, {
+    const reEmbedded = await index.updateFact(id, {
       ...(text !== undefined ? { text } : {}),
       ...(category !== undefined ? { category: category as MemoryCategory } : {}),
       ...(file_path !== undefined ? { file_path } : {}),
@@ -335,7 +313,7 @@ export function createServer({ db, index, eviction = DEFAULT_EVICTION_CONFIG, no
           load_with: updated?.load_with ? updated.load_with.split(',').map(s => s.trim()) : null,
           pinned: updated?.pinned === 1,
           ephemeral: updated?.ephemeral === 1,
-          re_embedded: textChanged || tagsChanged,
+          re_embedded: reEmbedded,
         }, null, 2),
       }],
     };
@@ -360,7 +338,6 @@ export function createServer({ db, index, eviction = DEFAULT_EVICTION_CONFIG, no
       };
     }
 
-    await index.deleteFact(id);
     db.deleteMemory(id);
 
     return {
@@ -391,17 +368,7 @@ export function createServer({ db, index, eviction = DEFAULT_EVICTION_CONFIG, no
       };
     }
 
-    // List IDs before any deletion so Vectra can be cleaned first
-    const rows = db.listEphemeralMemories(resolvedProject);
-    const ids = rows.map(r => r.id);
-
-    // Vectra first — SQLite records remain as fallback if Vectra fails partway
-    for (const id of ids) {
-      try { await index.deleteFact(id); } catch { /* already gone from index */ }
-    }
-
-    // SQLite last — atomic via RETURNING in db
-    db.clearEphemeralMemories(resolvedProject);
+    const ids = db.clearEphemeralMemories(resolvedProject);
 
     return {
       content: [{
@@ -695,18 +662,17 @@ export function createServer({ db, index, eviction = DEFAULT_EVICTION_CONFIG, no
     const tagsString = tags?.length ? tags.join(', ') : undefined;
     const loadWithString = load_with?.length ? load_with.join(',') : undefined;
 
-    const result = await index.addFact(pointer_text, {
+    const result = await index.addFact({
+      text: pointer_text,
       category: category as MemoryCategory,
       file_path: notePath,
       project: resolvedProject,
+      pinned,
       tags: tagsString,
+      load_with: loadWithString,
+      ephemeral,
     });
-
-    if (result.added) {
-      db.insertMemory(result.id, pointer_text, category as MemoryCategory, notePath, null, resolvedProject, pinned, tagsString, loadWithString, ephemeral);
-    }
-
-    const evicted = await evictIfNeeded();
+    const evicted = result.stored ? result.evicted : 0;
 
     return {
       content: [{
@@ -714,12 +680,12 @@ export function createServer({ db, index, eviction = DEFAULT_EVICTION_CONFIG, no
         text: JSON.stringify({
           written: true,
           file_path: notePath,
-          memory_stored: result.added,
+          memory_stored: result.stored,
           memory_id: result.id,
           category,
           project: resolvedProject,
           ephemeral: ephemeral || false,
-          ...(result.added ? {} : { existing_memory_id: result.id, reason: 'Semantically similar memory already exists' }),
+          ...(result.stored ? {} : { existing_memory_id: result.id, reason: 'Semantically similar memory already exists' }),
           ...(evicted > 0 ? { evicted } : {}),
         }, null, 2),
       }],

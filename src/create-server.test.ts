@@ -16,9 +16,9 @@ describe('tools', () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(path.join(tmpdir(), 'claude-memory-tools-'));
     notesDir = mkdtempSync(path.join(tmpdir(), 'claude-memory-notes-'));
-    const store = openStore(dataDir);
+    const store = openStore(dataDir, { eviction: { maxMemories: 3 } });
     db = store.db;
-    client = await connectServer({ ...store, eviction: { maxMemories: 3 }, notesRoot: () => notesDir });
+    client = await connectServer({ ...store, notesRoot: () => notesDir });
   });
 
   afterEach(async () => {
@@ -190,7 +190,7 @@ describe('two sessions sharing one data dir', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it.fails('a store in one session is searchable from another already running', async () => {
+  it('a store in one session is searchable from another already running', async () => {
     const a = await session();
     const b = await session();
     await a.call('memory_query', { text: 'warm up', project: P });
@@ -199,7 +199,7 @@ describe('two sessions sharing one data dir', () => {
     expect(found.results[0]?.id).toBe(stored.id);
   });
 
-  it.fails('dedup sees memories stored by another session', async () => {
+  it('dedup sees memories stored by another session', async () => {
     const a = await session();
     const b = await session();
     await a.call('memory_query', { text: 'warm up', project: P });
@@ -208,7 +208,7 @@ describe('two sessions sharing one data dir', () => {
     expect(second.stored).toBe(false);
   });
 
-  it.fails('a store in one session does not erase a store made by another', async () => {
+  it('a store in one session does not erase a store made by another', async () => {
     const a = await session();
     const b = await session();
     await a.call('memory_query', { text: 'warm up', project: P });

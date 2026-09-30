@@ -1,113 +1,47 @@
-import { LocalIndex } from 'vectra';
-import type { MetadataFilter } from 'vectra';
-import path from 'path';
-import os from 'os';
-import fs from 'fs';
-import { restrictToOwner } from './permissions.js';
 import { embed as defaultEmbed } from './embeddings.js';
-import type { MemoryMetadata, AddFactResult, QueryFactResult } from './types.js';
+import { embedSource } from './embed-source.js';
+import type { MemoryDb, MemoryUpdateFields } from './db.js';
+import type { VectorHit } from './vectors.js';
+import { DEFAULT_EVICTION_CONFIG } from './types.js';
+import type { NewMemory, StoreResult, EvictionConfig } from './types.js';
 
-const DEFAULT_DATA_DIR = path.join(os.homedir(), '.claude-memory');
+type EmbedFn = (text: string) => Promise<ArrayLike<number>>;
 
+/**
+ * Semantic operations over the SQLite store. Embedding is slow and async, so it
+ * always happens here, before the db opens its (synchronous) write transaction.
+ */
 export interface MemoryIndex {
-  addFact(text: string, metadata: { category: string; file_path?: string; project?: string; tags?: string }): Promise<AddFactResult>;
-  updateFact(id: string, text: string, metadata: { category: string; file_path?: string; project?: string; tags?: string }): Promise<void>;
-  queryFacts(text: string, topK?: number, project?: string): Promise<QueryFactResult[]>;
-  deleteFact(id: string): Promise<void>;
+  addFact(memory: NewMemory): Promise<StoreResult>;
+  /** Apply the update, re-embedding when text or tags change. Returns whether it re-embedded. */
+  updateFact(id: string, fields: MemoryUpdateFields): Promise<boolean>;
+  queryFacts(text: string, topK?: number, project?: string): Promise<VectorHit[]>;
 }
 
 export function createMemoryIndex(
-  indexPath: string,
-  embedFn: (text: string) => Promise<number[]> = defaultEmbed,
+  db: MemoryDb,
+  { embed = defaultEmbed, eviction = DEFAULT_EVICTION_CONFIG }: { embed?: EmbedFn; eviction?: EvictionConfig } = {},
 ): MemoryIndex {
-  let index: LocalIndex<MemoryMetadata> | null = null;
-
-  async function getIndex(): Promise<LocalIndex<MemoryMetadata>> {
-    if (index) return index;
-    fs.mkdirSync(indexPath, { recursive: true, mode: 0o700 });
-    index = new LocalIndex<MemoryMetadata>(indexPath);
-    if (!await index.isIndexCreated()) {
-      await index.createIndex();
-    }
-    restrictToOwner(indexPath, [path.join(indexPath, 'index.json')]);
-    return index;
-  }
-
   return {
-    async addFact(text, metadata) {
-      const idx = await getIndex();
-
-      // Embed text + tags together so tags enrich semantic search
-      const textToEmbed = metadata.tags ? `${text} ${metadata.tags}` : text;
-      const vector = await embedFn(textToEmbed);
-
-      // Semantic dedup — reject if a very similar memory already exists
-      const results = await idx.queryItems(vector, '', 1);
-      if (results.length > 0 && results[0].score > 0.85) {
-        return { added: false, existing: results[0].item.metadata.text, id: results[0].item.id };
-      }
-
-      const fullMetadata: MemoryMetadata = {
-        text,
-        category: metadata.category as MemoryMetadata['category'],
-        file_path: metadata.file_path || '',
-        project: metadata.project || '',
-        tags: metadata.tags || '',
-      };
-      const item = await idx.insertItem({ vector, metadata: fullMetadata });
-      return { added: true, id: item.id };
+    async addFact(memory) {
+      const source = embedSource(memory.text, memory.tags);
+      return db.storeMemory(memory, { vector: await embed(source), source }, eviction);
     },
 
-    async updateFact(id, text, metadata) {
-      const idx = await getIndex();
-      const textToEmbed = metadata.tags ? `${text} ${metadata.tags}` : text;
-      const vector = await embedFn(textToEmbed);
-
-      const fullMetadata: MemoryMetadata = {
-        text,
-        category: metadata.category as MemoryMetadata['category'],
-        file_path: metadata.file_path || '',
-        project: metadata.project || '',
-        tags: metadata.tags || '',
-      };
-
-      // Replace vector item in-place by deleting and re-inserting with same ID
-      try { await idx.deleteItem(id); } catch { /* not found, insert fresh */ }
-      await idx.insertItem({ id, vector, metadata: fullMetadata });
+    async updateFact(id, fields) {
+      const row = db.getMemory(id);
+      if (!row) return false;
+      const source = embedSource(fields.text ?? row.text, 'tags' in fields ? fields.tags : row.tags);
+      if (source === embedSource(row.text, row.tags)) {
+        db.updateMemory(id, fields);
+        return false;
+      }
+      db.updateMemoryAndVector(id, fields, { vector: await embed(source), source });
+      return true;
     },
 
     async queryFacts(text, topK = 5, project?) {
-      const idx = await getIndex();
-      const vector = await embedFn(text);
-
-      const filter: MetadataFilter | undefined = project
-        ? { project: { '$eq': project } }
-        : undefined;
-
-      const results = await idx.queryItems(vector, '', topK, filter);
-      return results.map(r => ({
-        id: r.item.id,
-        text: r.item.metadata.text,
-        category: r.item.metadata.category,
-        score: r.score,
-      }));
-    },
-
-    async deleteFact(id) {
-      const idx = await getIndex();
-      await idx.deleteItem(id);
+      return db.searchVectors(await embed(text), topK, project);
     },
   };
-}
-
-// Default singleton for production
-let _default: MemoryIndex | null = null;
-
-// Singleton branch untestable without polluting production code with a reset hook
-/* v8 ignore next 5 */
-export function getDefaultIndex(): MemoryIndex {
-  if (!_default) {
-    _default = createMemoryIndex(path.join(DEFAULT_DATA_DIR, 'vector_index'));
-  }
-  return _default;
 }

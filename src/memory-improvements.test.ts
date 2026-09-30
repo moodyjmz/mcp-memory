@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'os';
 import { execSync } from 'child_process';
 import path from 'path';
-import { createTestDb, createTestIndex } from './test-helpers.js';
+import { createTestStore } from './test-helpers.js';
 import { scanClaudeFiles, getRecentlyChangedFiles } from './project-utils.js';
 import { writeNote } from './notes-dir.js';
 import type { MemoryDb } from './db.js';
@@ -47,12 +47,10 @@ describe('memory_project_summary: claude_files drift detection', () => {
   let db: MemoryDb;
   let index: MemoryIndex;
   let dbDir: string;
-  let idxDir: string;
   let repoDir: string;
 
   beforeEach(() => {
-    ({ db, dir: dbDir } = createTestDb());
-    ({ index, dir: idxDir } = createTestIndex());
+    ({ db, index, dir: dbDir } = createTestStore());
     repoDir = makeTempDir();
     initGitRepo(repoDir);
     mkdirSync(path.join(repoDir, '.claude'));
@@ -61,7 +59,6 @@ describe('memory_project_summary: claude_files drift detection', () => {
   afterEach(() => {
     db.close();
     rmSync(dbDir, { recursive: true, force: true });
-    rmSync(idxDir, { recursive: true, force: true });
     rmSync(repoDir, { recursive: true, force: true });
   });
 
@@ -85,13 +82,13 @@ describe('memory_project_summary: claude_files drift detection', () => {
     const relPath = path.join('.claude', 'icon-migration.md');
 
     // Store a pointer memory
-    const { id, added } = await index.addFact('Icon migration reference', {
+    const result = await index.addFact({
+      text: 'Icon migration reference',
       category: 'architecture',
       file_path: relPath,
       project: 'test-project',
     });
-    expect(added).toBe(true);
-    db.insertMemory(id, 'Icon migration reference', 'architecture', relPath, null, 'test-project');
+    expect(result.stored).toBe(true);
 
     const files = scanClaudeFiles(repoDir);
     const allMemories = db.listMemories(undefined, 'test-project');
@@ -110,13 +107,13 @@ describe('memory_project_summary: claude_files drift detection', () => {
     const relPathIcons = path.join('.claude', 'icon-migration.md');
 
     // Only store a pointer for icon-migration.md
-    const { id, added } = await index.addFact('Icon migration reference', {
+    const result = await index.addFact({
+      text: 'Icon migration reference',
       category: 'architecture',
       file_path: relPathIcons,
       project: 'test-project',
     });
-    expect(added).toBe(true);
-    db.insertMemory(id, 'Icon migration reference', 'architecture', relPathIcons, null, 'test-project');
+    expect(result.stored).toBe(true);
 
     const files = scanClaudeFiles(repoDir);
     const allMemories = db.listMemories(undefined, 'test-project');
@@ -139,12 +136,10 @@ describe('memory_project_summary: memories_for_recent_files', () => {
   let db: MemoryDb;
   let index: MemoryIndex;
   let dbDir: string;
-  let idxDir: string;
   let repoDir: string;
 
   beforeEach(() => {
-    ({ db, dir: dbDir } = createTestDb());
-    ({ index, dir: idxDir } = createTestIndex());
+    ({ db, index, dir: dbDir } = createTestStore());
     repoDir = makeTempDir();
     initGitRepo(repoDir);
   });
@@ -152,20 +147,20 @@ describe('memory_project_summary: memories_for_recent_files', () => {
   afterEach(() => {
     db.close();
     rmSync(dbDir, { recursive: true, force: true });
-    rmSync(idxDir, { recursive: true, force: true });
     rmSync(repoDir, { recursive: true, force: true });
   });
 
   it('surfaces memories whose file_path matches recently changed files', async () => {
     gitCommit(repoDir, { 'src/Toolbar.js': 'toolbar code' }, 'add toolbar');
 
-    const { id, added } = await index.addFact('Toolbar uses iconCls pattern', {
+    const result = await index.addFact({
+      text: 'Toolbar uses iconCls pattern',
       category: 'convention',
       file_path: 'src/Toolbar.js',
       project: 'test-project',
     });
-    expect(added).toBe(true);
-    db.insertMemory(id, 'Toolbar uses iconCls pattern', 'convention', 'src/Toolbar.js', null, 'test-project');
+    expect(result.stored).toBe(true);
+    const id = result.id;
 
     const recentFiles = getRecentlyChangedFiles(repoDir, 20);
     const recentSet = new Set(recentFiles);
@@ -179,13 +174,13 @@ describe('memory_project_summary: memories_for_recent_files', () => {
   it('does not surface memories for files not in recent commits', async () => {
     gitCommit(repoDir, { 'src/Other.js': 'other' }, 'add other');
 
-    const { id, added } = await index.addFact('Memory about unrelated file', {
+    const result = await index.addFact({
+      text: 'Memory about unrelated file',
       category: 'convention',
       file_path: 'src/Toolbar.js', // NOT in recent commits
       project: 'test-project',
     });
-    expect(added).toBe(true);
-    db.insertMemory(id, 'Memory about unrelated file', 'convention', 'src/Toolbar.js', null, 'test-project');
+    expect(result.stored).toBe(true);
 
     const recentFiles = getRecentlyChangedFiles(repoDir, 20);
     const recentSet = new Set(recentFiles);
@@ -207,12 +202,10 @@ describe('memory_store_file: atomic write and pointer memory', () => {
   let db: MemoryDb;
   let index: MemoryIndex;
   let dbDir: string;
-  let idxDir: string;
   let repoDir: string;
 
   beforeEach(() => {
-    ({ db, dir: dbDir } = createTestDb());
-    ({ index, dir: idxDir } = createTestIndex());
+    ({ db, index, dir: dbDir } = createTestStore());
     repoDir = makeTempDir();
     initGitRepo(repoDir);
     mkdirSync(path.join(repoDir, '.claude'));
@@ -221,7 +214,6 @@ describe('memory_store_file: atomic write and pointer memory', () => {
   afterEach(() => {
     db.close();
     rmSync(dbDir, { recursive: true, force: true });
-    rmSync(idxDir, { recursive: true, force: true });
     rmSync(repoDir, { recursive: true, force: true });
   });
 
@@ -236,12 +228,8 @@ describe('memory_store_file: atomic write and pointer memory', () => {
     // Mirrors the server handler: the note path is always built by writeNote
     const notePath = writeNote(repoDir, project, name, content);
 
-    const result = await index.addFact(pointerText, { category, file_path: notePath, project });
-    if (result.added) {
-      db.insertMemory(result.id, pointerText, category, notePath, null, project, undefined, undefined, undefined, ephemeral);
-    }
-
-    return { notePath, memoryId: result.id, memoryAdded: result.added };
+    const result = await index.addFact({ text: pointerText, category, file_path: notePath, project, ephemeral });
+    return { notePath, memoryId: result.id, memoryAdded: result.stored };
   }
 
   it('writes the note under <org>/<repo> and stores a pointer memory', async () => {
