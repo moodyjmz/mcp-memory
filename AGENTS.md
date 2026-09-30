@@ -13,6 +13,7 @@ It is installed as an MCP server in Claude Code's config via `npm run setup` (se
 | Path | Purpose |
 | :--- | :------ |
 | `src/server.ts` | MCP tool definitions (entry point). All tools registered here. |
+| `src/instructions.ts` | Server instructions sent in the MCP initialize result: when to use memory. Size-capped by its test. |
 | `src/db.ts` | SQLite layer — schema, migrations, CRUD, eviction. |
 | `src/memory-index.ts` | Vectra vector index — add, query, delete facts. Semantic dedup at 0.85 cosine threshold. |
 | `src/embeddings.ts` | HuggingFace transformer embeddings (local). Model: `Xenova/all-MiniLM-L6-v2`. |

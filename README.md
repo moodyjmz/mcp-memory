@@ -139,7 +139,7 @@ npm install
 npm run setup
 ```
 
-This builds the TypeScript, registers the MCP server globally with Claude Code, adds memory usage instructions to `~/.claude/CLAUDE.md`, configures tool permissions for autonomous access, and installs session hooks — so Claude proactively stores and recalls knowledge across sessions.
+This builds the TypeScript, registers the MCP server globally with Claude Code, serves memory usage instructions through the MCP `instructions` field (and removes the block earlier versions wrote into `~/.claude/CLAUDE.md`), configures tool permissions for autonomous access, and installs session hooks — so Claude proactively stores and recalls knowledge across sessions.
 
 Verify with `claude mcp list` or `/mcp` inside a session.
 
@@ -346,7 +346,7 @@ This lives **outside** every repo on purpose — no `.gitignore` entry needed, a
 git pull && npm run setup
 ```
 
-`setup.sh` builds the TypeScript, re-registers the MCP server, replaces the `~/.claude/CLAUDE.md` instructions block in-place, and merges any new tool permissions into `settings.json`. Running it again on an existing install is safe and idempotent.
+`setup.sh` builds the TypeScript, re-registers the MCP server, removes the old `~/.claude/CLAUDE.md` instructions block if present, and merges any new tool permissions into `settings.json`. Running it again on an existing install is safe and idempotent. The memory instructions now come from the server's MCP `instructions` field (`src/instructions.ts`), which Claude Code keeps in context even when the memory tools are deferred. Subagents no longer carry the CLAUDE.md block; whether they receive server instructions isn't documented. Installs from before this change keep the CLAUDE.md block until setup is re-run.
 
 **Database** — no action needed. New columns (`tags`, `load_with`, etc.) are added automatically via `ALTER TABLE` migrations on first startup. Existing memories are untouched.
 
