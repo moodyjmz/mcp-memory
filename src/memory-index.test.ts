@@ -59,6 +59,19 @@ describe('memory-index over SQLite', () => {
     expect(vectorCount()).toBe(3);
   });
 
+  it('never evicts the memory it has just stored', async () => {
+    const { db: small, index: smallIndex, dir: smallDir } = createTestStore({ maxMemories: 1 });
+    try {
+      await smallIndex.addFact({ text: 'pinned', category: 'gotcha', pinned: true });
+      const res = await smallIndex.addFact({ text: 'new', category: 'gotcha' });
+      expect(res).toMatchObject({ stored: true, evicted: 0 });
+      expect(small.getMemory(res.id)).toBeDefined();
+    } finally {
+      small.close();
+      rmSync(smallDir, { recursive: true, force: true });
+    }
+  });
+
   it('updateFact re-embeds when text or tags change', async () => {
     const { id } = await index.addFact({ text: 'old', category: 'gotcha' });
     expect(await index.updateFact(id, { text: 'new' })).toBe(true);

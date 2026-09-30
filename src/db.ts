@@ -174,7 +174,7 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   const exemptList = [...EVICTION_EXEMPT_CATEGORIES].map(() => '?').join(',');
   const evictableSql = `
     SELECT id FROM memories
-    WHERE pinned = 0 AND ephemeral = 0 AND category NOT IN (${exemptList})
+    WHERE id IS NOT ? AND pinned = 0 AND ephemeral = 0 AND category NOT IN (${exemptList})
     ORDER BY COALESCE(last_accessed, created_at) ASC
     LIMIT ?`;
   const countStmt = db.prepare('SELECT COUNT(*) as count FROM memories');
@@ -244,10 +244,11 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     return current;
   }
 
-  function evict(config: EvictionConfig): number {
+  /** Evict down to the limit, never the memory just stored (`keep`). */
+  function evict(config: EvictionConfig, keep: string): number {
     const excess = (countStmt.get() as { count: number }).count - config.maxMemories;
     if (excess <= 0) return 0;
-    return evictStmt.run([...EVICTION_EXEMPT_CATEGORIES, excess]).changes;
+    return evictStmt.run([keep, ...EVICTION_EXEMPT_CATEGORIES, excess]).changes;
   }
 
   const storeTx = db.transaction((memory: NewMemory, embedded: Embedded, eviction: EvictionConfig): StoreResult => {
@@ -261,7 +262,7 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     const id = randomUUID();
     insertRow(id, memory.text, memory.category, memory.file_path, memory.git_sha, memory.project, memory.pinned, memory.tags, memory.load_with, memory.ephemeral);
     putVector(id, embedded);
-    return { stored: true, id, evicted: evict(eviction) };
+    return { stored: true, id, evicted: evict(eviction, id) };
   });
 
   function putIfCurrent(id: string, embedded: Embedded): boolean {
@@ -362,7 +363,7 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     getEvictableIds(config) {
       const excess = this.countMemories() - config.maxMemories;
       if (excess <= 0) return [];
-      return (db.prepare(evictableSql).all([...EVICTION_EXEMPT_CATEGORIES, excess]) as { id: string }[]).map(r => r.id);
+      return (db.prepare(evictableSql).all([null, ...EVICTION_EXEMPT_CATEGORIES, excess]) as { id: string }[]).map(r => r.id);
     },
 
     listEphemeralMemories(project) {
