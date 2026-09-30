@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.0.1](https://github.com/moodyjmz/mcp-memory/compare/v4.0.0...v4.0.1) (2026-09-30)
+
+### Bug Fixes
+
+* 🐛 heal unsearchable memories and make startup safe across processes ([9fd8481](https://github.com/moodyjmz/mcp-memory/commit/9fd84818df4fc73025c490fb8336566624a0c3fe))
+* 🐛 load the embedding model once per process ([7f67317](https://github.com/moodyjmz/mcp-memory/commit/7f673178311721621d0fdc45df1945ce547c74e3))
+* 🐛 never evict the memory that was just stored ([2b9f700](https://github.com/moodyjmz/mcp-memory/commit/2b9f700ee7bea1af0265a5aea9104c168e74f76e))
+* 🐛 refuse to start on an invalid MEMORY_MAX_COUNT ([363138d](https://github.com/moodyjmz/mcp-memory/commit/363138d4afdf3eca3524f5a075d82abc4d9bc01b))
+* 🐛 store vectors in SQLite so every session searches the same index ([3c0fa7c](https://github.com/moodyjmz/mcp-memory/commit/3c0fa7ce6e54be5e38adb2ecbb13912763a60cdb))
+
 # [4.0.0](https://github.com/moodyjmz/mcp-memory/compare/v3.1.0...v4.0.0) (2026-09-30)
 
 * fix!: 🔒 write memory_store_file notes only under a server-built path ([99f27ec](https://github.com/moodyjmz/mcp-memory/commit/99f27eccd4eff7973bd689a07dda85f2144ec301))
