@@ -1,5 +1,22 @@
 # Changelog
 
+# [4.0.0](https://github.com/moodyjmz/mcp-memory/compare/v3.1.0...v4.0.0) (2026-09-30)
+
+* fix!: 🔒 write memory_store_file notes only under a server-built path ([99f27ec](https://github.com/moodyjmz/mcp-memory/commit/99f27eccd4eff7973bd689a07dda85f2144ec301))
+
+### Bug Fixes
+
+* 🐛 log instead of crashing when owner-only permissions can't be applied ([7660c7d](https://github.com/moodyjmz/mcp-memory/commit/7660c7dd5e49364902ccaf40127b6ec29c1e75bf))
+* 🐛 reject a relative MEMORY_FILES_DIR ([8ac9616](https://github.com/moodyjmz/mcp-memory/commit/8ac9616a7db1f4a1ef934788614b43a7359a76c5))
+* 🔒 bound repo_unlink id and check numeric arguments in the limits test ([1f98fdd](https://github.com/moodyjmz/mcp-memory/commit/1f98fddde8039365658a9b89fe9c5a158e0e1d32))
+* 🔒 cap the size of every tool argument ([3e0b7f1](https://github.com/moodyjmz/mcp-memory/commit/3e0b7f10396d8c2a0e9213eb712d95b273fa32e4))
+* 🔒 reapply owner-only permissions to the data folder on every start ([afc0911](https://github.com/moodyjmz/mcp-memory/commit/afc0911f41a0dcd44cc7238df66760a4442ad2b7))
+
+### BREAKING CHANGES
+
+* memory_store_file takes `name` instead of `file_path`;
+  `file_path` is now only a project hint.
+
 # [3.1.0](https://github.com/moodyjmz/mcp-memory/compare/v3.0.2...v3.1.0) (2026-09-29)
 
 ### Features
