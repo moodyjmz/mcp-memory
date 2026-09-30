@@ -5,8 +5,11 @@ import { createMemoryIndex } from './memory-index.js';
 import { getDefaultDb, DEFAULT_DATA_DIR } from './db.js';
 import { getEmbedder } from './embeddings.js';
 import { restrictToOwner } from './permissions.js';
+import { evictionConfigFromEnv } from './config.js';
 
 async function main(): Promise<void> {
+  // Read config before touching any data, so a bad value stops the server cleanly
+  const eviction = evictionConfigFromEnv();
   // Anything the server creates (db sidecars, notes) is owner-only from the start
   process.umask(0o077);
   // Versions up to 4.0.0 kept a copy of every memory in vector_index/index.json. It is
@@ -15,7 +18,7 @@ async function main(): Promise<void> {
   restrictToOwner(legacyIndex, [path.join(legacyIndex, 'index.json')]);
 
   const db = getDefaultDb();
-  const index = createMemoryIndex(db);
+  const index = createMemoryIndex(db, { eviction });
   const server = createServer({ db, index });
   const transport = new StdioServerTransport();
   await server.connect(transport);

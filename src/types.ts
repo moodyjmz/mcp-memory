@@ -56,6 +56,7 @@ export interface EvictionConfig {
   maxMemories: number;
 }
 
+/** Without MEMORY_MAX_COUNT; the server reads that through evictionConfigFromEnv() */
 export const DEFAULT_EVICTION_CONFIG: EvictionConfig = {
-  maxMemories: parseInt(process.env.MEMORY_MAX_COUNT || '2000', 10),
+  maxMemories: 2000,
 };
