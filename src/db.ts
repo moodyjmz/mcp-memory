@@ -6,7 +6,7 @@ import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { restrictToOwner } from './permissions.js';
 import { embedSource } from './embed-source.js';
-import { encodeVector, decodeVector, vectorNorm, cosine, topK, type VectorHit } from './vectors.js';
+import { encodeVector, decodeVector, vectorNorm, cosine, type VectorHit } from './vectors.js';
 import type { MemoryRow, MemoryCategory, EvictionConfig, NewMemory, Embedded, StoreResult } from './types.js';
 import { EVICTION_EXEMPT_CATEGORIES } from './types.js';
 
@@ -16,6 +16,25 @@ export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.claude-memory');
 export const DEDUP_THRESHOLD = 0.85;
 
 const SCHEMA_VERSION = 1;
+const BUSY_TIMEOUT_MS = 5000;
+
+/**
+ * Switching a rollback-journal file to WAL needs an exclusive lock, and when several
+ * processes race for it SQLite returns BUSY without waiting for the busy timeout.
+ * That happens when sessions start together on a new or pre-WAL database.
+ */
+function enableWal(db: BetterSqlite3.Database): void {
+  const deadline = Date.now() + BUSY_TIMEOUT_MS;
+  for (;;) {
+    try {
+      db.pragma('journal_mode = WAL');
+      return;
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'SQLITE_BUSY' || Date.now() > deadline) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+}
 
 export interface RepoRelationship {
   id: number;
@@ -37,6 +56,12 @@ export interface MemoryUpdateFields {
   ephemeral?: boolean;
 }
 
+export interface UnsearchableRow {
+  id: string;
+  text: string;
+  tags: string | null;
+}
+
 export interface MemoryDb {
   insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned?: boolean, tags?: string | null, load_with?: string | null, ephemeral?: boolean): void;
   updateMemory(id: string, fields: MemoryUpdateFields): void;
@@ -45,9 +70,15 @@ export interface MemoryDb {
   deleteMemory(id: string): void;
   /** Dedup, insert the row and its vector, then evict, as one transaction. */
   storeMemory(memory: NewMemory, embedded: Embedded, eviction: EvictionConfig): StoreResult;
-  /** Update the row; write the vector only if it still matches the row's text and tags afterwards. */
-  updateMemoryAndVector(id: string, fields: MemoryUpdateFields, embedded: Embedded): void;
+  /** Update the row; write the vector only if it still matches the row's text and tags afterwards. Returns whether it did. */
+  updateMemoryAndVector(id: string, fields: MemoryUpdateFields, embedded: Embedded): boolean;
+  /** Write the vector only if it was embedded from the row's current text and tags. False if the row changed or is gone. */
+  putVectorIfCurrent(id: string, embedded: Embedded): boolean;
   searchVectors(queryVector: ArrayLike<number>, k: number, project?: string): VectorHit[];
+  /** Rows search can't find as they read now: no vector, or one embedded from other text or tags. */
+  listUnsearchable(project?: string): UnsearchableRow[];
+  /** The row as it reads now if it is still unsearchable, otherwise undefined. */
+  getUnsearchable(id: string): UnsearchableRow | undefined;
   getMemory(id: string): MemoryRow | undefined;
   listMemories(category?: MemoryCategory, project?: string): MemoryRow[];
   listEphemeralMemories(project: string): MemoryRow[];
@@ -66,8 +97,8 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   // One server process runs per Claude session, all on this file; writers wait up to 5s for each other
-  const db: BetterSqlite3.Database = new Database(dbPath, { timeout: 5000 });
-  db.pragma('journal_mode = WAL');
+  const db: BetterSqlite3.Database = new Database(dbPath, { timeout: BUSY_TIMEOUT_MS });
+  enableWal(db);
   // SQLite gives new -wal/-shm files the db file's mode, but existing ones keep theirs
   restrictToOwner(dir, [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]);
 
@@ -157,6 +188,15 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   // The inner join skips vectors whose row is gone
   const vectorsStmt = db.prepare('SELECT v.id, v.vector FROM memory_vectors v JOIN memories m USING(id) WHERE v.dim = ?');
   const projectVectorsStmt = db.prepare('SELECT v.id, v.vector FROM memory_vectors v JOIN memories m USING(id) WHERE v.dim = ? AND m.project = ?');
+  const sourcesSql = 'SELECT m.id, m.text, m.tags, v.source FROM memories m LEFT JOIN memory_vectors v USING(id)';
+  const sourcesStmt = db.prepare(sourcesSql);
+  const projectSourcesStmt = db.prepare(`${sourcesSql} WHERE m.project = ?`);
+  const sourceStmt = db.prepare(`${sourcesSql} WHERE m.id = ?`);
+  const sameTextStmt = db.prepare(`${sourcesSql} WHERE m.text = ?`);
+  type SourceRow = UnsearchableRow & { source: string | null };
+  // Compared in JS so embedSource stays the only definition of what gets embedded
+  const unsearchable = (r: SourceRow) => r.source !== embedSource(r.text, r.tags);
+  const withoutSource = ({ id, text, tags }: SourceRow): UnsearchableRow => ({ id, text, tags });
 
   function insertRow(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned = false, tags: string | null = null, load_with: string | null = null, ephemeral = false): void {
     insertStmt.run(id, text, category, file_path ?? null, git_sha ?? null, project ?? null, new Date().toISOString(), pinned ? 1 : 0, tags ?? null, load_with ?? null, ephemeral ? 1 : 0);
@@ -187,12 +227,21 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     if (k <= 0) return [];
     const queryNorm = vectorNorm(queryVector);
     const rows = (project
-      ? projectVectorsStmt.iterate(queryVector.length, project)
-      : vectorsStmt.iterate(queryVector.length)) as IterableIterator<{ id: string; vector: Buffer }>;
-    function* scored(): Iterable<VectorHit> {
-      for (const row of rows) yield { id: row.id, score: cosine(queryVector, queryNorm, decodeVector(row.vector)) };
+      ? projectVectorsStmt.all(queryVector.length, project)
+      : vectorsStmt.all(queryVector.length)) as Array<{ id: string; vector: Buffer }>;
+    const hits = rows
+      .map(row => ({ id: row.id, score: cosine(queryVector, queryNorm, decodeVector(row.vector)) }))
+      .sort((a, b) => b.score - a.score);
+    // A vector embedded from text the memory no longer has (edited by an older server, or
+    // by another session mid-embed) would match the old wording; skip it until it is healed
+    const current: VectorHit[] = [];
+    for (const hit of hits) {
+      // Outside a transaction another session can delete a hit after the scan; skip it
+      const row = sourceStmt.get(hit.id) as SourceRow | undefined;
+      if (row && !unsearchable(row)) current.push(hit);
+      if (current.length === k) break;
     }
-    return topK(scored(), k);
+    return current;
   }
 
   function evict(config: EvictionConfig): number {
@@ -206,17 +255,28 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     if (top && top.score > DEDUP_THRESHOLD) {
       return { stored: false, id: top.id, existing: (getStmt.get(top.id) as MemoryRow).text };
     }
+    // Memories with no current vector are invisible to the check above; an identical text still counts
+    const twin = (sameTextStmt.all(memory.text) as SourceRow[]).find(unsearchable);
+    if (twin) return { stored: false, id: twin.id, existing: twin.text };
     const id = randomUUID();
     insertRow(id, memory.text, memory.category, memory.file_path, memory.git_sha, memory.project, memory.pinned, memory.tags, memory.load_with, memory.ephemeral);
     putVector(id, embedded);
     return { stored: true, id, evicted: evict(eviction) };
   });
 
-  const updateTx = db.transaction((id: string, fields: MemoryUpdateFields, embedded: Embedded) => {
-    updateRow(id, fields);
+  function putIfCurrent(id: string, embedded: Embedded): boolean {
     const row = getStmt.get(id) as MemoryRow | undefined;
     // Another session may have changed the text or tags since this vector was embedded
-    if (row && embedSource(row.text, row.tags) === embedded.source) putVector(id, embedded);
+    if (!row || embedSource(row.text, row.tags) !== embedded.source) return false;
+    putVector(id, embedded);
+    return true;
+  }
+
+  const putIfCurrentTx = db.transaction(putIfCurrent);
+
+  const updateTx = db.transaction((id: string, fields: MemoryUpdateFields, embedded: Embedded): boolean => {
+    updateRow(id, fields);
+    return putIfCurrent(id, embedded);
   });
 
   return {
@@ -241,11 +301,25 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     },
 
     updateMemoryAndVector(id, fields, embedded) {
-      updateTx.immediate(id, fields, embedded);
+      return updateTx.immediate(id, fields, embedded);
+    },
+
+    putVectorIfCurrent(id, embedded) {
+      return putIfCurrentTx.immediate(id, embedded);
     },
 
     searchVectors(queryVector, k, project?) {
       return search(queryVector, k, project);
+    },
+
+    listUnsearchable(project?) {
+      const rows = (project ? projectSourcesStmt.all(project) : sourcesStmt.all()) as SourceRow[];
+      return rows.filter(unsearchable).map(withoutSource);
+    },
+
+    getUnsearchable(id) {
+      const row = sourceStmt.get(id) as SourceRow | undefined;
+      return row && unsearchable(row) ? withoutSource(row) : undefined;
     },
 
     getMemory(id) {

@@ -18,13 +18,15 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 export async function seedMemories(dataDir: string, count: number, projects = 20): Promise<void> {
   createMemoryDb(path.join(dataDir, 'memory.db')).close();
   const raw = new Database(path.join(dataDir, 'memory.db'));
-  const vectors = await Promise.all(Array.from({ length: count }, (_, i) => mockEmbed(`seed memory ${i}`)));
+  // Padded to the few hundred characters real memories run to
+  const text = (i: number) => `seed memory ${i}` + ' about how some part of a codebase works'.repeat(8);
+  const vectors = await Promise.all(Array.from({ length: count }, (_, i) => mockEmbed(text(i))));
   const row = raw.prepare("INSERT INTO memories (id, text, category, project, created_at) VALUES (?, ?, 'gotcha', ?, '2026-01-01T00:00:00.000Z')");
   const vec = raw.prepare('INSERT INTO memory_vectors (id, dim, source, vector) VALUES (?, ?, ?, ?)');
   raw.transaction(() => {
     vectors.forEach((v, i) => {
-      row.run(`seed-${i}`, `seed memory ${i}`, `project-${i % projects}`);
-      vec.run(`seed-${i}`, v.length, `seed memory ${i}`, encodeVector(v));
+      row.run(`seed-${i}`, text(i), `project-${i % projects}`);
+      vec.run(`seed-${i}`, v.length, text(i), encodeVector(v));
     });
   })();
   raw.close();

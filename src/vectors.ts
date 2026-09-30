@@ -40,17 +40,3 @@ export function cosine(a: ArrayLike<number>, aNorm: number, b: ArrayLike<number>
   if (aNorm === 0 || bb === 0) return 0;
   return dot / (aNorm * Math.sqrt(bb));
 }
-
-/** The k best hits, highest score first. k is small (tool topK is capped), so a sorted insert beats a heap. */
-export function topK(hits: Iterable<VectorHit>, k: number): VectorHit[] {
-  const best: VectorHit[] = [];
-  if (k <= 0) return best;
-  for (const hit of hits) {
-    if (best.length === k && hit.score <= best[k - 1].score) continue;
-    let i = best.length;
-    while (i > 0 && best[i - 1].score < hit.score) i--;
-    best.splice(i, 0, hit);
-    if (best.length > k) best.pop();
-  }
-  return best;
-}

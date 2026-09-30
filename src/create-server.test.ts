@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { openStore, connectServer, type TestClient } from './test-helpers.js';
 import type { MemoryDb } from './db.js';
+import type { MemoryIndex } from './memory-index.js';
 
 const P = 'https://example.test/org/repo';
 
@@ -11,13 +12,14 @@ describe('tools', () => {
   let dataDir: string;
   let notesDir: string;
   let db: MemoryDb;
+  let index: MemoryIndex;
   let client: TestClient;
 
   beforeEach(async () => {
     dataDir = mkdtempSync(path.join(tmpdir(), 'claude-memory-tools-'));
     notesDir = mkdtempSync(path.join(tmpdir(), 'claude-memory-notes-'));
     const store = openStore(dataDir, { eviction: { maxMemories: 3 } });
-    db = store.db;
+    ({ db, index } = store);
     client = await connectServer({ ...store, notesRoot: () => notesDir });
   });
 
@@ -123,6 +125,26 @@ describe('tools', () => {
     expect(found.results.map((r: { text: string }) => r.text)).toEqual(['kept']);
   });
 
+  it('memory_query warns about unsearchable memories and starts healing them', async () => {
+    // A row with no vector, as an older server version leaves it
+    db.insertMemory('legacy', 'stored before vectors moved', 'gotcha', null, null, P);
+    const before = await client.call('memory_query', { text: 'stored before vectors moved', project: P });
+    expect(before.warning).toBe('1 memories are not searchable yet');
+    expect(before.results).toEqual([]);
+
+    await index.heal(); // joins the pass the query started
+    const after = await client.call('memory_query', { text: 'stored before vectors moved', project: P });
+    expect(after.warning).toBeUndefined();
+    expect(after.results[0]).toMatchObject({ id: 'legacy', score: 1 });
+  });
+
+  it('memory_project_summary reports unsearchable memories only while there are some', async () => {
+    db.insertMemory('legacy', 'stored before vectors moved', 'gotcha', null, null, P);
+    expect((await client.call('memory_project_summary', { project: P })).unsearchable).toBe(1);
+    await index.heal();
+    expect((await client.call('memory_project_summary', { project: P })).unsearchable).toBeUndefined();
+  });
+
   it('memory_store_file writes the note and stores a searchable pointer', async () => {
     const res = await client.call('memory_store_file', {
       name: 'findings', content: '# notes', pointer_text: 'where the findings live', category: 'architecture', project: P,
@@ -131,6 +153,13 @@ describe('tools', () => {
     expect(readFileSync(res.file_path, 'utf8')).toBe('# notes');
     const found = await client.call('memory_query', { text: 'where the findings live', project: P, topK: 1 });
     expect(found.results[0]).toMatchObject({ id: res.memory_id, file_path: res.file_path });
+  });
+
+  it('memory_store_file also starts healing unsearchable memories', async () => {
+    db.insertMemory('legacy', 'stored before vectors moved', 'gotcha', null, null, P);
+    await client.call('memory_store_file', { name: 'n', content: 'x', pointer_text: 'a pointer', category: 'architecture', project: P });
+    await new Promise(resolve => setImmediate(resolve)); // the pass runs on microtasks with the fake embedder
+    expect(db.listUnsearchable()).toEqual([]);
   });
 
   it('memory_store_file refuses to overwrite an existing note', async () => {

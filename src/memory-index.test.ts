@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync, readFileSync } from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { createTestStore, mockEmbed } from './test-helpers.js';
+import { createTestStore, openStore, mockEmbed } from './test-helpers.js';
 import { createMemoryIndex, type MemoryIndex } from './memory-index.js';
 import { DEDUP_THRESHOLD, type MemoryDb } from './db.js';
 import { encodeVector } from './vectors.js';
@@ -76,6 +76,12 @@ describe('memory-index over SQLite', () => {
     expect(sourceOf(id)).toBe('stable');
   });
 
+  it('updateFact reports no re-embed when the memory is deleted mid-embed', async () => {
+    const { id } = await index.addFact({ text: 'doomed', category: 'gotcha' });
+    const racing = createMemoryIndex(db, { embed: async text => { db.deleteMemory(id); return mockEmbed(text); } });
+    expect(await racing.updateFact(id, { text: 'doomed v2' })).toBe(false);
+  });
+
   it('updateFact on a missing id does nothing', async () => {
     expect(await index.updateFact('missing', { text: 'x' })).toBe(false);
     expect(db.countMemories()).toBe(0);
@@ -89,10 +95,29 @@ describe('memory-index over SQLite', () => {
         return mockEmbed(text);
       },
     });
-    expect(await racing.updateFact(id, { tags: 't' })).toBe(true);
+    expect(await racing.updateFact(id, { tags: 't' })).toBe(false);
     expect(db.getMemory(id)).toMatchObject({ text: 'changed elsewhere', tags: 't' });
     // The embedded 'original t' no longer describes the row, so it must not be written
     expect(sourceOf(id)).toBe('original');
+  });
+
+  it('does not dedup or match against a vector the memory has outgrown', async () => {
+    const { id } = await index.addFact({ text: 'fact A', category: 'gotcha' });
+    // An older server edits the text without touching the vector
+    raw.prepare("UPDATE memories SET text = 'fact B' WHERE id = ?").run(id);
+    expect((await index.queryFacts('fact A', 5)).map(h => h.id)).not.toContain(id);
+    const again = await index.addFact({ text: 'fact A', category: 'gotcha' });
+    expect(again.stored).toBe(true);
+    await index.heal();
+    const [hit] = await index.queryFacts('fact B', 1);
+    expect(hit).toMatchObject({ id });
+  });
+
+  it('refuses the exact text of a memory that has no vector yet', async () => {
+    db.insertMemory('legacy', 'the build needs node 22', 'gotcha');
+    expect(await index.addFact({ text: 'the build needs node 22', category: 'decision' }))
+      .toEqual({ stored: false, id: 'legacy', existing: 'the build needs node 22' });
+    expect(db.countMemories()).toBe(1);
   });
 
   it('deleting a row drops its vector, whichever server version deletes it', async () => {
@@ -120,6 +145,113 @@ describe('memory-index over SQLite', () => {
   it('memory_list rows carry no vector data', async () => {
     await index.addFact({ text: 'listed', category: 'gotcha' });
     expect(Object.keys(db.listMemories()[0])).not.toContain('vector');
+  });
+});
+
+describe('heal: re-embedding unsearchable memories', () => {
+  let db: MemoryDb;
+  let index: MemoryIndex;
+  let dir: string;
+  let raw: Database.Database;
+
+  beforeEach(() => {
+    ({ db, index, dir } = createTestStore());
+    raw = new Database(path.join(dir, 'memory.db'));
+  });
+
+  afterEach(() => {
+    raw.close();
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const counts = () => raw.prepare(`SELECT (SELECT COUNT(*) FROM memories) AS rows, (SELECT COUNT(*) FROM memory_vectors) AS vectors`).get();
+
+  it('embeds every row that has no vector, and a second pass does nothing', async () => {
+    for (let i = 0; i < 5; i++) db.insertMemory(`m${i}`, `row ${i}`, 'gotcha', null, null, 'p', false, i % 2 ? 'tag' : null);
+    expect(db.listUnsearchable()).toHaveLength(5);
+    expect(await index.heal()).toEqual({ embedded: 5, changed: 0, skipped: 0 });
+    expect(db.listUnsearchable()).toEqual([]);
+    const [hit] = await index.queryFacts('row 1 tag', 1);
+    expect(hit).toMatchObject({ id: 'm1' });
+    expect(await index.heal()).toEqual({ embedded: 0, changed: 0, skipped: 0 });
+  });
+
+  it('shares one pass between concurrent calls in a process', async () => {
+    db.insertMemory('m', 'row', 'gotcha');
+    const first = index.heal();
+    expect(index.heal()).toBe(first);
+    await first;
+  });
+
+  it('is safe with two processes healing the same rows at once', async () => {
+    for (let i = 0; i < 20; i++) db.insertMemory(`m${i}`, `row ${i}`, 'gotcha');
+    const other = openStore(dir);
+    try {
+      const results = await Promise.all([index.heal(), other.index.heal()]);
+      expect(results.every(r => !r.error)).toBe(true);
+      expect(counts()).toEqual({ rows: 20, vectors: 20 });
+    } finally {
+      other.db.close();
+    }
+  });
+
+  it('skips rows another process re-embedded after the pass listed them', async () => {
+    for (let i = 0; i < 10; i++) db.insertMemory(`m${i}`, `row ${i}`, 'gotcha');
+    const other = openStore(dir);
+    try {
+      let first = true;
+      const slow = createMemoryIndex(db, {
+        embed: async text => {
+          // While this pass embeds its first row, another session heals everything
+          if (first) { first = false; await other.index.heal(); }
+          return mockEmbed(text);
+        },
+      });
+      expect(await slow.heal()).toEqual({ embedded: 1, changed: 0, skipped: 9 });
+      expect(counts()).toEqual({ rows: 10, vectors: 10 });
+    } finally {
+      other.db.close();
+    }
+  });
+
+  it('never overwrites a vector written by a newer update', async () => {
+    db.insertMemory('m', 'old text', 'gotcha');
+    const racing = createMemoryIndex(db, {
+      embed: async text => {
+        if (text === 'old text') await index.updateFact('m', { text: 'newer text' });
+        return mockEmbed(text);
+      },
+    });
+    expect(await racing.heal()).toEqual({ embedded: 0, changed: 1, skipped: 0 });
+    expect(raw.prepare("SELECT source FROM memory_vectors WHERE id = 'm'").get()).toEqual({ source: 'newer text' });
+  });
+
+  it('repairs what a pre-SQLite-vector server leaves behind', async () => {
+    const { id: edited } = await index.addFact({ text: 'edited by an old server', category: 'gotcha' });
+    const { id: deleted } = await index.addFact({ text: 'deleted by an old server', category: 'gotcha' });
+    // What an old server does: it knows nothing of memory_vectors
+    raw.prepare("INSERT INTO memories (id, text, category, created_at) VALUES ('new', 'stored by an old server', 'gotcha', '2026-01-01')").run();
+    raw.prepare("UPDATE memories SET text = 'text an old server changed' WHERE id = ?").run(edited);
+    raw.prepare('DELETE FROM memories WHERE id = ?').run(deleted);
+
+    expect(db.listUnsearchable().map(r => r.id).sort()).toEqual([edited, 'new'].sort());
+    expect(await index.heal()).toEqual({ embedded: 2, changed: 0, skipped: 0 });
+    expect(db.listUnsearchable()).toEqual([]);
+    expect(counts()).toEqual({ rows: 2, vectors: 2 });
+  });
+
+  it('logs and resolves when embedding fails', async () => {
+    db.insertMemory('m', 'row', 'gotcha');
+    const broken = createMemoryIndex(db, { embed: () => Promise.reject(new Error('model failed to load')) });
+    expect(await broken.heal()).toEqual({ embedded: 0, changed: 0, skipped: 0, error: 'model failed to load' });
+    expect(db.listUnsearchable()).toHaveLength(1);
+  });
+
+  it('counts unsearchable rows per project', () => {
+    db.insertMemory('a', 'in p1', 'gotcha', null, null, 'p1');
+    db.insertMemory('b', 'in p2', 'gotcha', null, null, 'p2');
+    expect(db.listUnsearchable('p1')).toEqual([{ id: 'a', text: 'in p1', tags: null }]);
   });
 });
 
