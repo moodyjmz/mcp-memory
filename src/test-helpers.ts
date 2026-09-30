@@ -4,8 +4,31 @@ import path from 'path';
 import { createMemoryDb, type MemoryDb } from './db.js';
 import { createMemoryIndex, type MemoryIndex } from './memory-index.js';
 import { createServer, type ServerDeps } from './create-server.js';
+import type { EvictionConfig } from './types.js';
+import { encodeVector } from './vectors.js';
+import Database from 'better-sqlite3';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+
+/**
+ * Fill a data dir with `count` memories and vectors across `projects` projects,
+ * bypassing dedup so large stores seed in one transaction. Used by the search
+ * benchmark and its regression test.
+ */
+export async function seedMemories(dataDir: string, count: number, projects = 20): Promise<void> {
+  createMemoryDb(path.join(dataDir, 'memory.db')).close();
+  const raw = new Database(path.join(dataDir, 'memory.db'));
+  const vectors = await Promise.all(Array.from({ length: count }, (_, i) => mockEmbed(`seed memory ${i}`)));
+  const row = raw.prepare("INSERT INTO memories (id, text, category, project, created_at) VALUES (?, ?, 'gotcha', ?, '2026-01-01T00:00:00.000Z')");
+  const vec = raw.prepare('INSERT INTO memory_vectors (id, dim, source, vector) VALUES (?, ?, ?, ?)');
+  raw.transaction(() => {
+    vectors.forEach((v, i) => {
+      row.run(`seed-${i}`, `seed memory ${i}`, `project-${i % projects}`);
+      vec.run(`seed-${i}`, v.length, `seed memory ${i}`, encodeVector(v));
+    });
+  })();
+  raw.close();
+}
 
 /**
  * Deterministic 384-dim embedding from text.
@@ -47,24 +70,21 @@ export function createTestDb(): { db: MemoryDb; dir: string } {
 }
 
 /**
- * Create an isolated test vector index in a temp directory.
- * Uses mockEmbed by default.
+ * Create an isolated test database and an index over it in a temp directory.
+ * Uses mockEmbed.
  */
-export function createTestIndex(embedFn = mockEmbed): { index: MemoryIndex; dir: string } {
-  const dir = mkdtempSync(path.join(tmpdir(), 'claude-memory-idx-'));
-  const index = createMemoryIndex(dir, embedFn);
-  return { index, dir };
+export function createTestStore(eviction?: EvictionConfig): { db: MemoryDb; index: MemoryIndex; dir: string } {
+  const dir = mkdtempSync(path.join(tmpdir(), 'claude-memory-test-'));
+  return { ...openStore(dir, { eviction }), dir };
 }
 
 /**
  * Open the stores in a data dir the way one server process does. Two calls on
  * the same dir behave like two Claude sessions sharing ~/.claude-memory.
  */
-export function openStore(dataDir: string, embedFn = mockEmbed): { db: MemoryDb; index: MemoryIndex } {
-  return {
-    db: createMemoryDb(path.join(dataDir, 'memory.db')),
-    index: createMemoryIndex(path.join(dataDir, 'vector_index'), embedFn),
-  };
+export function openStore(dataDir: string, { eviction }: { eviction?: EvictionConfig } = {}): { db: MemoryDb; index: MemoryIndex } {
+  const db = createMemoryDb(path.join(dataDir, 'memory.db'));
+  return { db, index: createMemoryIndex(db, { embed: mockEmbed, eviction }) };
 }
 
 export interface TestClient {

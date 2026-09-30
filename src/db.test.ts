@@ -348,6 +348,33 @@ describe('migrations', () => {
     db.close();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it('adds the vector table and schema version to a v4 database, keeping its rows', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'claude-memory-migration-test-'));
+    const dbPath = path.join(dir, 'memory.db');
+    try {
+      const v4 = new Database(dbPath);
+      v4.exec(`
+        CREATE TABLE memories (id TEXT PRIMARY KEY, text TEXT NOT NULL, category TEXT NOT NULL, file_path TEXT, git_sha TEXT,
+          project TEXT, created_at TEXT NOT NULL, last_accessed TEXT, pinned INTEGER NOT NULL DEFAULT 0, tags TEXT, load_with TEXT,
+          ephemeral INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO memories (id, text, category, created_at) VALUES ('old', 'from v4', 'gotcha', '2026-01-01T00:00:00.000Z');
+      `);
+      v4.close();
+
+      createMemoryDb(dbPath).close();
+      const db = createMemoryDb(dbPath); // a second open must be a no-op
+      const raw = new Database(dbPath);
+      expect(raw.pragma('user_version', { simple: true })).toBe(1);
+      expect(raw.prepare("SELECT name FROM sqlite_master WHERE name IN ('memory_vectors', 'memories_ad')").all()).toHaveLength(2);
+      expect(db.getMemory('old')?.text).toBe('from v4');
+      expect(raw.prepare('SELECT COUNT(*) AS n FROM memory_vectors').get()).toEqual({ n: 0 });
+      raw.close();
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('ephemeral memories', () => {

@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
+    "bench": "npm run build && node scripts/bench-search.mjs",
     "setup": "./setup.sh",
     "release": "release-it"
   },
@@ -18,8 +19,7 @@
     "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
-    "onnxruntime-node": "^1.27.0",
-    "vectra": "^0.15.0"
+    "onnxruntime-node": "^1.27.0"
   },
   "devDependencies": {
     "@release-it/conventional-changelog": "^12.0.0",
