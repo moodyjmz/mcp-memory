@@ -74,6 +74,13 @@ export interface ServerDeps {
 }
 
 export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }: ServerDeps): McpServer {
+  /** How many memories in scope search can't find yet; starts a background re-embed if any. */
+  function unsearchable(project?: string): number {
+    const count = db.listUnsearchable(project).length;
+    if (count > 0) void index.heal();
+    return count;
+  }
+
   const server = new McpServer({
     name: 'claude-memory',
     version: '2.0.0',
@@ -134,6 +141,7 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
     }
 
     const evicted = result.evicted;
+    unsearchable();
 
     return {
       content: [{
@@ -170,6 +178,7 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
     const resolvedProject = resolveProject(project, file_path) || undefined;
 
     const results = await index.queryFacts(text, topK || 5, resolvedProject);
+    const missing = unsearchable(resolvedProject);
 
     // Track access for eviction
     const ids = results.map(r => r.id);
@@ -232,7 +241,11 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
     return {
       content: [{
         type: 'text' as const,
-        text: JSON.stringify({ results: enriched, also_relevant: alsoRelevant }, null, 2),
+        text: JSON.stringify({
+          results: enriched,
+          also_relevant: alsoRelevant,
+          ...(missing > 0 ? { warning: `${missing} memories are not searchable yet` } : {}),
+        }, null, 2),
       }],
     };
   });
@@ -515,6 +528,7 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
     }
 
     const allMemories = db.listMemories(undefined, resolvedProject);
+    const missing = unsearchable(resolvedProject);
     const longTerm = allMemories.filter(r => r.ephemeral === 0);
     const ephemerals = allMemories.filter(r => r.ephemeral === 1);
 
@@ -606,6 +620,7 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
           project: resolvedProject,
           session_state: sessionState,
           total_memories: longTerm.length,
+          ...(missing > 0 ? { unsearchable: missing } : {}),
           category_counts: categoryCounts,
           pinned_memories: pinned,
           people: people.length > 0 ? people : undefined,
@@ -673,6 +688,7 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
       ephemeral,
     });
     const evicted = result.stored ? result.evicted : 0;
+    unsearchable();
 
     return {
       content: [{

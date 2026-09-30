@@ -15,14 +15,23 @@ async function main(): Promise<void> {
   restrictToOwner(legacyIndex, [path.join(legacyIndex, 'index.json')]);
 
   const db = getDefaultDb();
-  const server = createServer({ db, index: createMemoryIndex(db) });
+  const index = createMemoryIndex(db);
+  const server = createServer({ db, index });
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('claude-memory MCP server running on stdio');
 
-  // Warm the embedding model in background
+  const unsearchable = db.listUnsearchable().length;
+  if (unsearchable > 0) {
+    console.error(`claude-memory: ${unsearchable} memories are not searchable yet; re-embedding them in the background`);
+  }
+
+  // Warm the embedding model in background, then heal what older versions or other sessions left unsearchable
   getEmbedder().then(() => {
     console.error('Embedding model ready');
+    return index.heal();
+  }).then(result => {
+    if (result.embedded > 0) console.error(`claude-memory: re-embedded ${result.embedded} memories`);
   }).catch(err => {
     console.error('Embedding model failed to load:', (err as Error).message);
   });

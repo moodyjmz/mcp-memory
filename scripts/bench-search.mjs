@@ -7,7 +7,7 @@ import { seedMemories, mockEmbed } from '../dist/test-helpers.js';
 import { createMemoryDb } from '../dist/db.js';
 
 const COUNT = 10_000;
-const RUNS = 50;
+const RUNS = 200;
 
 const dir = mkdtempSync(path.join(tmpdir(), 'claude-memory-bench-'));
 try {
@@ -15,19 +15,24 @@ try {
   const db = createMemoryDb(path.join(dir, 'memory.db'));
   const queries = await Promise.all(Array.from({ length: RUNS }, (_, i) => mockEmbed(`bench query ${i}`)));
 
-  const measure = project => {
-    db.searchVectors(queries[0], 5, project);
+  const time = run => {
+    run(queries[0]);
     const times = queries.map(q => {
       const start = performance.now();
-      db.searchVectors(q, 5, project);
+      run(q);
       return performance.now() - start;
     }).sort((a, b) => a - b);
     return `median ${times[RUNS >> 1].toFixed(1)} ms, p95 ${times[Math.floor(RUNS * 0.95)].toFixed(1)} ms`;
   };
 
-  console.log(`${COUNT} memories, ${RUNS} queries each`);
-  console.log(`  all projects: ${measure()}`);
-  console.log(`  one project (${COUNT / 20} rows): ${measure('project-0')}`);
+  console.log(`${COUNT} memories, ${RUNS} runs each`);
+  for (const [label, project] of [['all projects', undefined], [`one project (${COUNT / 20} rows)`, 'project-0']]) {
+    console.log(`  ${label}`);
+    console.log(`    search: ${time(q => db.searchVectors(q, 5, project))}`);
+    // Every query, store and summary also counts unsearchable memories in its scope
+    console.log(`    unsearchable count: ${time(() => db.listUnsearchable(project))}`);
+    console.log(`    memory_query (both): ${time(q => { db.searchVectors(q, 5, project); db.listUnsearchable(project); })}`);
+  }
   db.close();
 } finally {
   rmSync(dir, { recursive: true, force: true });
