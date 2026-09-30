@@ -10,17 +10,19 @@ A local MCP (Model Context Protocol) server that gives Claude Code persistent, s
 
 ```
 src/
-  server.ts          MCP entry point, registers tools via stdio
+  server.ts          MCP entry point: opens the store, connects stdio, starts healing
+  create-server.ts   Tool definitions (createServer), testable without stdio
   embeddings.ts      Local embedding model (Xenova/all-MiniLM-L6-v2, 384-dim)
-  memory-index.ts    Vectra vector index for semantic search + dedup
-  db.ts              SQLite metadata store (category, file path, git SHA, project)
+  memory-index.ts    Embedding side: store, update, query, re-embed unsearchable memories
+  db.ts              SQLite store: memories, their vectors, dedup, eviction, migrations
+  vectors.ts         Vector encoding, cosine similarity, top-k
   staleness.ts       Git log-based staleness detection for file-linked memories
   types.ts           Shared type definitions
 ```
 
 Data is stored in `~/.claude-memory/` (separate from source code):
-- `memory.db` — SQLite database (WAL mode)
-- `vector_index/` — Vectra local index files
+- `memory.db` — SQLite database (WAL mode) holding memories and their vectors
+- `vector_index/` — the index used up to 4.0.0; no longer read or written, kept as the rollback path
 
 ## Tools
 
@@ -28,15 +30,15 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 |------|-------------|
 | `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold). Captures git SHA for file-linked memories. Auto-detects project from git root. Accepts optional `tags` and `load_with` arrays. |
 | `memory_update` | Amend an existing memory — update text, tags, category, file_path, pinned, or load_with without deleting and re-creating. Re-embeds automatically if text or tags change. |
-| `memory_query` | Semantic search. Returns `{ results, also_relevant }` — results are top-K semantic matches with staleness flags; also_relevant are tag-matched memories not in the main results (often causally related). Accepts `file_path` to auto-detect project (mirrors `memory_store`). |
+| `memory_query` | Semantic search. Returns `{ results, also_relevant }` — results are top-K semantic matches with staleness flags; also_relevant are tag-matched memories not in the main results (often causally related). Accepts `file_path` to auto-detect project (mirrors `memory_store`). Adds a `warning` while any memories in scope are not searchable yet. |
 | `memory_graph` | Compact table-of-contents of all project memories grouped by category, with 120-char excerpts, tags, and load_with. Use at session start to see everything that exists before querying. |
 | `memory_list` | List memories filtered by category and/or project. Returns full rows. |
-| `memory_forget` | Remove a memory by ID from both stores. |
+| `memory_forget` | Remove a memory and its vector by ID. |
 | `memory_clear_ephemerals` | Bulk-clear all session-scoped memories for a project. Use at session end after reviewing which to promote. Accepts `file_path` to auto-detect project (mirrors `memory_store`). |
 | `repo_link` | Record a cross-repo relationship (provides, consumes, depends_on, builds_from, extends). |
 | `repo_unlink` | Remove a cross-repo relationship by ID. |
 | `repo_map` | Show all known cross-repo relationships, optionally filtered by project. |
-| `memory_project_summary` | Lightweight project overview for session start: category counts, pinned memories, repo relationships, `recently_useful` (top 5 by last access — what was helpful before), and `recently_added` (top 5 by creation date — what's new). Full text via `memory_query`. |
+| `memory_project_summary` | Lightweight project overview for session start: category counts, pinned memories, repo relationships, `recently_useful` (top 5 by last access — what was helpful before), and `recently_added` (top 5 by creation date — what's new). Includes `unsearchable` while any memories have no current vector. Full text via `memory_query`. |
 | `memory_store_file` | Write a markdown notes file and store a pointer memory to it. Takes a `name`; the server creates `<MEMORY_FILES_DIR or ~/.claude-memory/notes>/<org>/<repo>/<name>.md` and never writes inside repositories or Claude Code config. |
 
 ### Categories
@@ -120,7 +122,7 @@ The markdown file ships in PRs, survives session end, and lets you resurrect the
 
 Memories are automatically evicted when the count exceeds `maxMemories` (default 2000). Least-recently-accessed memories are removed first. **Pinned memories are never evicted** — use `pinned: true` on `memory_store` for permanent facts and user preferences. Configure via environment variable:
 
-- `MEMORY_MAX_COUNT` — max stored memories (default 2000)
+- `MEMORY_MAX_COUNT` — max stored memories (default 2000). Must be a positive whole number; the server refuses to start on anything else.
 
 ### Notes folder
 
@@ -209,6 +211,7 @@ npm run dev             # Watch mode
 npm test                # Run tests (vitest)
 npm run test:coverage   # Run tests with coverage report
 npm run test:watch      # Watch mode tests
+npm run bench           # Search latency at 10k memories (budget: 50 ms per query)
 npm run release         # Cut a new release (bumps version, generates changelog, tags, pushes, creates GitHub Release)
 ```
 
@@ -218,11 +221,14 @@ Releases are cut automatically by the `release.yml` GitHub Actions workflow on e
 
 ## How it works
 
-1. **Store**: Text is embedded locally, checked against existing vectors (cosine > 0.85 = duplicate), then stored in both Vectra (for search) and SQLite (for metadata). Eviction runs if over limit.
-2. **Update**: SQL fields (category, tags, pinned, load_with, file_path) update in SQLite only. If text or tags change, the Vectra vector is replaced in-place (delete + re-insert with same ID). SQL values are authoritative for display.
-3. **Query**: Input is embedded, Vectra returns nearest neighbours (optionally filtered by project), SQLite enriches with metadata and staleness. Tag-based `also_relevant` is computed from all project memories sharing tags with the results.
-4. **Graph**: `memory_graph` lists all project memories from SQLite grouped by category — no vector lookup needed.
-5. **Forget**: Removes from both Vectra index and SQLite.
+Every Claude session runs its own server process, and all of them share `memory.db`. SQLite's locking keeps them consistent: a memory stored in one session is immediately searchable, and deduplicated against, in every other.
+
+1. **Store**: Text plus tags is embedded locally first. Then one transaction checks the best match across all projects (cosine > 0.85 = duplicate; a memory not yet re-embedded counts as a duplicate only on identical text), inserts the memory and its vector, and evicts if over the limit, never the new memory.
+2. **Update**: Fields update in place. If text or tags change, the vector is re-embedded and written in the same transaction, but only if the memory still reads as it did when embedding started.
+3. **Query**: Input is embedded and scored against every stored vector (optionally filtered by project) by cosine similarity, skipping vectors embedded from text a memory no longer has; the matching rows add metadata and staleness. Tag-based `also_relevant` is computed from all project memories sharing tags with the results.
+4. **Graph**: `memory_graph` lists all project memories grouped by category — no vector lookup needed.
+5. **Forget**: Deleting a memory deletes its vector (a SQLite trigger).
+6. **Heal**: Memories with no vector, or one embedded from other text, are re-embedded in the background after startup and whenever a store, query or summary finds any.
 
 The embedding model (`Xenova/all-MiniLM-L6-v2`) runs locally — no API calls. It loads lazily on first use (~30MB download, cached after that).
 
@@ -252,7 +258,7 @@ Before any stored `git_sha` is used as a git revision, `staleness.ts` validates 
 
 ### Data directory permissions
 
-On every start the server sets `umask 077` and chmods `~/.claude-memory/` to `0700`, and `memory.db`, its `-wal`/`-shm` sidecars and the vector index to `0600`. This means installs created before a fix are tightened too. Memories can contain sensitive context about codebases and personal workflows, so they must not be readable by other local accounts. Notes written by `memory_store_file` are `0600`, in folders created `0700`.
+On every start the server sets `umask 077` and chmods `~/.claude-memory/` to `0700`, and `memory.db`, its `-wal`/`-shm` sidecars and the old `vector_index/index.json` to `0600`. This means installs created before a fix are tightened too. Memories can contain sensitive context about codebases and personal workflows, so they must not be readable by other local accounts. Notes written by `memory_store_file` are `0600`, in folders created `0700`.
 
 ### File writes
 
@@ -260,7 +266,7 @@ On every start the server sets `umask 077` and chmods `~/.claude-memory/` to `07
 
 ### Input limits
 
-Every string and array argument has an upper bound (`src/limits.ts`): text 8,000 characters, notes content 512 KiB, 32 tags of 64 characters, 32 `load_with` IDs, and `topK` 1-50. Oversized input is rejected, not truncated. `src/limits.test.ts` fails when a single-line `z.string()`, `z.array()` or `z.number()` argument in `server.ts` has no `.max()` or `.regex()`.
+Every string and array argument has an upper bound (`src/limits.ts`): text 8,000 characters, notes content 512 KiB, 32 tags of 64 characters, 32 `load_with` IDs, and `topK` 1-50. Oversized input is rejected, not truncated. `src/limits.test.ts` fails when a single-line `z.string()`, `z.array()` or `z.number()` argument in `create-server.ts` has no `.max()` or `.regex()`.
 
 ## Dependencies
 
@@ -268,8 +274,7 @@ Every string and array argument has an upper bound (`src/limits.ts`): text 8,000
 - `@modelcontextprotocol/sdk` — MCP server framework
 - `@huggingface/transformers` — local embedding inference
 - `onnxruntime-node` — ONNX runtime for the embedding model
-- `better-sqlite3` — SQLite bindings
-- `vectra` — local vector index
+- `better-sqlite3` — SQLite bindings (memories and vectors)
 
 **Development:**
 - `typescript` — type safety
@@ -350,6 +355,11 @@ git pull && npm run setup
 
 **Database** — no action needed. New columns (`tags`, `load_with`, etc.) are added automatically via `ALTER TABLE` migrations on first startup. Existing memories are untouched.
 
+**After 4.0.0: vectors move into `memory.db`.** Versions up to 4.0.0 kept vectors in `vector_index/index.json`, which every session cached and rewrote whole, so sessions lost each other's writes and some memories became unsearchable. On first start the new version re-embeds every memory that has no vector, in the background: a few hundred memories take about 4 s on Apple Silicon, model load included.
+
+- **Restart every Claude session after upgrading.** A session still running the old version keeps reading and writing only `index.json`: it can't find memories stored by upgraded sessions, and memories it stores have no vector until an upgraded server re-embeds them.
+- **Rolling back loses data.** `index.json` stays on disk unchanged, but the new version never writes to it. After a downgrade, memories stored since the upgrade are missing from search, and memories forgotten since can come back in search results.
+
 **v4: `memory_store_file` takes `name` instead of `file_path` (breaking).** It used to write to a caller-chosen `.claude/*.md` path. It now creates `~/.claude-memory/notes/<org>/<repo>/<name>.md` (see `MEMORY_FILES_DIR`), never overwrites, and `file_path` is only a hint for detecting the project. Callers passing the old `file_path`-only form get a schema error. Files written by older versions stay where they are.
 
 **v3 — cm-findings moved outside the repo (breaking):** prior versions kept `cm-findings/` inside each repo's own root, gitignored. It now lives at `~/cm-findings/<org>/<repo>/` instead — this was never actually "transportable" while gitignored (it couldn't leave the machine that wrote it), and an in-repo location doesn't work for a multi-repo workspace where several checkouts share one findings pool. If you have existing `<repo>/cm-findings/` directories, migrate their contents by hand to `~/cm-findings/<org>/<repo>/` (check `git remote get-url origin` for the exact org/repo) — `session-start.sh` will flag any old-style directory it finds and remind you to move it. Re-run `npm run setup` to pick up the updated hooks and CLAUDE.md instructions; nothing in the database is affected.
@@ -359,4 +369,5 @@ git pull && npm run setup
 - **Build before first use** — the server runs from `dist/`, not `src/`. You must run `npm run build` after cloning or the server won't start.
 - **nvm users** — `$(which node)` captures the active nvm node path at registration time. If you switch node versions later, the MCP registration will break. Consider using a `.nvmrc` with `nvm exec` or the full versioned path.
 - **Native module (`better-sqlite3`)** — compiles on `npm install`. If you change CPU architecture (e.g., x86 to ARM Mac) or jump major node versions, run `npm rebuild`.
+- **Tests don't touch `dist/`** — forked test workers run a copy compiled to `node_modules/.cache/claude-memory-test-dist`, so running the tests in the checkout a server is registered from doesn't change what it runs. Only `npm run build` does.
 - **First run downloads ~30MB** — the embedding model (`Xenova/all-MiniLM-L6-v2`) is fetched and cached locally on first `memory_store` or `memory_query`. Subsequent runs are fast.
