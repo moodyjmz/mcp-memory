@@ -2,15 +2,21 @@ interface Embedder {
   (text: string, options: { pooling: string; normalize: boolean }): Promise<{ data: Float32Array }>;
 }
 
-let embedder: Embedder | null = null;
+// The load is shared: the startup warm-up and the first heal or query otherwise
+// each load their own copy of the model. A failed load is retried on the next call.
+let loading: Promise<Embedder> | null = null;
 
-export async function getEmbedder(): Promise<Embedder> {
-  if (embedder) return embedder;
-  const { pipeline } = await import('@huggingface/transformers');
-  embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-    dtype: 'fp32',
-  }) as unknown as Embedder;
-  return embedder;
+export function getEmbedder(): Promise<Embedder> {
+  loading ??= (async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+    return await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+      dtype: 'fp32',
+    }) as unknown as Embedder;
+  })().catch(err => {
+    loading = null;
+    throw err;
+  });
+  return loading;
 }
 
 export async function embed(text: string): Promise<number[]> {
