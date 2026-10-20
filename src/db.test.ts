@@ -365,8 +365,8 @@ describe('migrations', () => {
       createMemoryDb(dbPath).close();
       const db = createMemoryDb(dbPath); // a second open must be a no-op
       const raw = new Database(dbPath);
-      expect(raw.pragma('user_version', { simple: true })).toBe(2);
-      expect(raw.prepare("SELECT name FROM sqlite_master WHERE name IN ('memory_vectors', 'memories_ad', 'memories_fts')").all()).toHaveLength(3);
+      expect(raw.pragma('user_version', { simple: true })).toBe(3);
+      expect(raw.prepare("SELECT name FROM sqlite_master WHERE name IN ('memory_vectors', 'memories_ad', 'memories_fts', 'memories_au_stamp')").all()).toHaveLength(4);
       expect(db.searchKeywords('migrated', 5)).toEqual(['old']);
       expect(db.getMemory('old')?.text).toBe('migrated from v4');
       expect(raw.prepare('SELECT COUNT(*) AS n FROM memory_vectors').get()).toEqual({ n: 0 });
@@ -555,11 +555,12 @@ describe('keyword index', () => {
 
   it('recreates a missing trigger on open, so later edits stay indexed', () => {
     db.insertMemory('m1', 'before', 'gotcha');
-    raw.exec('DROP TRIGGER memories_fts_au;');
+    raw.exec('DROP TRIGGER memories_fts_au; DROP TRIGGER memories_au_stamp;');
     db.close();
     db = createMemoryDb(dbPath());
     db.updateMemory('m1', { text: 'revised' });
     expect(db.searchKeywords('revised', 5)).toEqual(['m1']);
+    expect(db.getMemory('m1')!.updated_at).not.toBeNull();
   });
 
   it('matches across accents and Unicode normalisation forms', () => {
@@ -575,7 +576,7 @@ describe('keyword index', () => {
     raw.exec('DROP TRIGGER memories_fts_ai; DROP TRIGGER memories_fts_au; DROP TRIGGER memories_fts_ad; DROP TABLE memories_fts; DROP TABLE memory_fts_keys; PRAGMA user_version = 1;');
     db.close();
     db = createMemoryDb(dbPath());
-    expect(raw.pragma('user_version', { simple: true })).toBe(2);
+    expect(raw.pragma('user_version', { simple: true })).toBe(3);
     expect(db.searchKeywords('schema', 5)).toEqual(['m1']);
   });
 
@@ -613,5 +614,62 @@ describe('keyword index', () => {
     db = createMemoryDb(dbPath());
     expect(raw.prepare("SELECT name FROM sqlite_master WHERE name = 'memories_fts_au'").get()).toBeUndefined();
     expect(raw.pragma('user_version', { simple: true })).toBe(99);
+  });
+});
+
+describe('updated_at', () => {
+  let db: MemoryDb;
+  let dir: string;
+  let raw: Database.Database;
+  const updatedAt = (id: string) => db.getMemory(id)!.updated_at;
+
+  beforeEach(() => {
+    ({ db, dir } = createTestDb());
+    raw = new Database(path.join(dir, 'test.db'));
+  });
+
+  afterEach(() => {
+    raw.close();
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('is null until the content changes, then an ISO timestamp', () => {
+    db.insertMemory('m1', 'text', 'gotcha');
+    expect(updatedAt('m1')).toBeNull();
+    db.updateMemory('m1', { text: 'new text' });
+    expect(updatedAt('m1')).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(Date.now() - Date.parse(updatedAt('m1')!)).toBeLessThan(60_000);
+  });
+
+  it('counts tags, category and file_path as content', () => {
+    for (const [id, fields] of [['t', { tags: 'x' }], ['c', { category: 'decision' as const }], ['f', { file_path: 'a.ts' }]] as const) {
+      db.insertMemory(id, 'text', 'gotcha');
+      db.updateMemory(id, fields);
+      expect(updatedAt(id)).not.toBeNull();
+    }
+  });
+
+  it('ignores pinning, ephemeral, load_with, access and unchanged values', () => {
+    db.insertMemory('m1', 'text', 'gotcha', null, null, null, false, 'tag');
+    db.updateMemory('m1', { pinned: true, ephemeral: true, load_with: 'm2', tags: 'tag', text: 'text' });
+    db.updateLastAccessed(['m1']);
+    expect(updatedAt('m1')).toBeNull();
+  });
+
+  it('is stamped for edits made by plain SQL, as older server versions make them', () => {
+    db.insertMemory('m1', 'text', 'gotcha');
+    raw.prepare("UPDATE memories SET text = 'edited' WHERE id = 'm1'").run();
+    expect(updatedAt('m1')).not.toBeNull();
+  });
+
+  it('adds the column and trigger to a v2 database', () => {
+    db.insertMemory('m1', 'text', 'gotcha');
+    raw.exec('DROP TRIGGER memories_au_stamp; ALTER TABLE memories DROP COLUMN updated_at; PRAGMA user_version = 2;');
+    db.close();
+    db = createMemoryDb(path.join(dir, 'test.db'));
+    expect(updatedAt('m1')).toBeNull();
+    db.updateMemory('m1', { text: 'edited' });
+    expect(updatedAt('m1')).not.toBeNull();
   });
 });

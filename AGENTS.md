@@ -66,7 +66,7 @@ Opens a browser UI to invoke any tool manually without a full Claude Code sessio
 
 One SQLite database (`db.ts`), three parts:
 
-- **`memories`** — all metadata (text, category, tags, pinned, ephemeral, load_with, file_path, git_sha, project, timestamps).
+- **`memories`** — all metadata (text, category, tags, pinned, ephemeral, load_with, file_path, git_sha, project, timestamps). `updated_at` is stamped by a trigger when text, tags, category or file_path change (schema version 3), so edits by any server version count.
 - **`memory_vectors`** — one Float32 vector per memory, plus `source`, the exact string it was embedded from (text + tags, see `embedSource()`). A separate table so `SELECT *` over `memories` never returns vectors. An `AFTER DELETE` trigger on `memories` drops the vector.
 - **`memories_fts`** + **`memory_fts_keys`** — FTS5 trigram keyword index over text and tags, keyed by a stable integer per memory (schema version 2). Triggers on `memories` keep it in sync, so older server versions on the same file keep it current. The tokenizer folds diacritics (`remove_diacritics 1`), so every process writing the file needs SQLite 3.45+ with FTS5. A trigger change needs a schema version bump that drops and recreates the set; on every open a missing index object or a row-count mismatch rebuilds the index, triggers included.
 

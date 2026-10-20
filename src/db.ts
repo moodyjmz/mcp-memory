@@ -20,7 +20,7 @@ export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.claude-memory');
  */
 export const DEDUP_THRESHOLD = 0.85;
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const BUSY_TIMEOUT_MS = 5000;
 
 /**
@@ -91,6 +91,21 @@ function keywordIndexIntact(db: BetterSqlite3.Database): boolean {
 function hasObjects(db: BetterSqlite3.Database, names: string[]): boolean {
   const found = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN (${names.map(() => '?').join(',')})`).get(...names) as { n: number };
   return found.n === names.length;
+}
+
+/**
+ * Stamps updated_at when a memory's content changes, in SQL so edits by any server version
+ * count. Its own UPDATE doesn't re-fire it: updated_at isn't in the OF list.
+ */
+function createEditStamp(db: BetterSqlite3.Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS memories_au_stamp;
+    CREATE TRIGGER memories_au_stamp AFTER UPDATE OF text, tags, category, file_path ON memories
+      WHEN NEW.text IS NOT OLD.text OR NEW.tags IS NOT OLD.tags
+        OR NEW.category IS NOT OLD.category OR NEW.file_path IS NOT OLD.file_path BEGIN
+      UPDATE memories SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = NEW.id;
+    END;
+  `);
 }
 
 function countRows(db: BetterSqlite3.Database, table: string): number {
@@ -181,7 +196,8 @@ export function createMemoryDb(dbPath: string): MemoryDb {
         pinned INTEGER NOT NULL DEFAULT 0,
         tags TEXT,
         load_with TEXT,
-        ephemeral INTEGER NOT NULL DEFAULT 0
+        ephemeral INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
       CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project);
@@ -217,6 +233,9 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     if (!columns.some(c => c.name === 'ephemeral')) {
       db.exec('ALTER TABLE memories ADD COLUMN ephemeral INTEGER NOT NULL DEFAULT 0');
     }
+    if (!columns.some(c => c.name === 'updated_at')) {
+      db.exec('ALTER TABLE memories ADD COLUMN updated_at TEXT');
+    }
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_memories_ephemeral ON memories(ephemeral);
 
@@ -236,6 +255,7 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     // Never on a newer schema, which may have changed these objects on purpose.
     const repair = version <= SCHEMA_VERSION;
     if (version < 2 || (repair && !keywordIndexIntact(db))) createKeywordIndex(db);
+    if (version < 3 || (repair && !hasObjects(db, ['memories_au_stamp']))) createEditStamp(db);
     if (version < SCHEMA_VERSION) {
       db.pragma(`user_version = ${SCHEMA_VERSION}`);
     }

@@ -77,7 +77,13 @@ describe('tools', () => {
     const res = await client.call('memory_update', { id, text: 'new wording', pinned: true });
     expect(res).toMatchObject({ updated: true, id, text: 'new wording', pinned: true, re_embedded: true });
     const found = await client.call('memory_query', { text: 'new wording', project: P, topK: 1 });
-    expect(found.results[0]).toMatchObject({ id, score: 1 });
+    expect(found.results[0]).toMatchObject({ id, score: 1, updated: expect.any(String) });
+  });
+
+  it('memory_query leaves out updated for a memory never edited', async () => {
+    await client.call('memory_store', { text: 'never edited', category: 'gotcha', project: P });
+    const found = await client.call('memory_query', { text: 'never edited', project: P, topK: 1 });
+    expect(found.results[0]).not.toHaveProperty('updated');
   });
 
   it('memory_update without text or tag changes does not re-embed', async () => {

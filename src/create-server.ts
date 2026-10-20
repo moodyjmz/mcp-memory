@@ -199,6 +199,7 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
         file_path: row.file_path || null,
         project: row.project || null,
         date: row.created_at,
+        ...(row.updated_at ? { updated: row.updated_at } : {}),
         tags: row.tags || null,
         load_with: row.load_with ? row.load_with.split(',').map(s => s.trim()) : null,
         stale: staleness.stale,
