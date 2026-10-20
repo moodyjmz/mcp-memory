@@ -355,6 +355,11 @@ git pull && npm run setup
 
 **Database** — no action needed. New columns (`tags`, `load_with`, etc.) are added automatically via `ALTER TABLE` migrations on first startup. Existing memories are untouched.
 
+**After 4.0.1: keyword index and edit timestamps (schema version 3).** On first start the server adds a keyword index (`memories_fts`, `memory_fts_keys`), an `updated_at` column and the triggers that maintain them, in one transaction; a few hundred memories take well under a second. No re-embedding.
+
+- **Rolling back to 4.0.1 is safe.** It opens and writes the migrated file, and the triggers keep the index and `updated_at` current for its writes too.
+- **Anything else that writes `memory.db`** (a `sqlite3` shell, a script) needs SQLite with FTS5 and the trigram tokenizer's `remove_diacritics` option (3.45+); without them every write to `memories` fails. Reads are unaffected.
+
 **After 4.0.0: vectors move into `memory.db`.** Versions up to 4.0.0 kept vectors in `vector_index/index.json`, which every session cached and rewrote whole, so sessions lost each other's writes and some memories became unsearchable. On first start the new version re-embeds every memory that has no vector, in the background: a few hundred memories take about 4 s on Apple Silicon, model load included.
 
 - **Restart every Claude session after upgrading.** A session still running the old version keeps reading and writing only `index.json`: it can't find memories stored by upgraded sessions, and memories it stores have no vector until an upgraded server re-embeds them.
