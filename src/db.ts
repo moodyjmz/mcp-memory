@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto';
 import { restrictToOwner } from './permissions.js';
 import { embedSource } from './embed-source.js';
 import { encodeVector, decodeVector, vectorNorm, cosine, type VectorHit } from './vectors.js';
+import { toFtsQueries } from './fts-query.js';
 import type { MemoryRow, MemoryCategory, EvictionConfig, NewMemory, Embedded, StoreResult } from './types.js';
 import { EVICTION_EXEMPT_CATEGORIES } from './types.js';
 
@@ -19,7 +20,7 @@ export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.claude-memory');
  */
 export const DEDUP_THRESHOLD = 0.85;
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const BUSY_TIMEOUT_MS = 5000;
 
 /**
@@ -38,6 +39,62 @@ function enableWal(db: BetterSqlite3.Database): void {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
     }
   }
+}
+
+/**
+ * Keyword index. It keeps its own copy of the text: memories has a TEXT key, and VACUUM may
+ * renumber the rowids an external-content table would point at. memory_fts_keys gives each
+ * memory a stable integer key for the FTS rowid, so a delete is a lookup, not a scan.
+ * Triggers keep it in sync, so server versions that predate it keep it current too; they are
+ * dropped and recreated (never IF NOT EXISTS) so a later schema version can change them.
+ */
+function createKeywordIndex(db: BetterSqlite3.Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS memories_fts_ai;
+    DROP TRIGGER IF EXISTS memories_fts_au;
+    DROP TRIGGER IF EXISTS memories_fts_ad;
+    DROP TABLE IF EXISTS memories_fts;
+    DROP TABLE IF EXISTS memory_fts_keys;
+    CREATE TABLE memory_fts_keys (key INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE);
+    -- remove_diacritics folds NFC, NFD and unaccented spellings together (macOS paths are NFD)
+    CREATE VIRTUAL TABLE memories_fts USING fts5(text, tags, tokenize = 'trigram remove_diacritics 1');
+    CREATE TRIGGER memories_fts_ai AFTER INSERT ON memories BEGIN
+      INSERT INTO memory_fts_keys (id) VALUES (NEW.id);
+      INSERT INTO memories_fts (rowid, text, tags)
+        VALUES ((SELECT key FROM memory_fts_keys WHERE id = NEW.id), NEW.text, NEW.tags);
+    END;
+    CREATE TRIGGER memories_fts_au AFTER UPDATE OF text, tags ON memories
+      WHEN NEW.text IS NOT OLD.text OR NEW.tags IS NOT OLD.tags BEGIN
+      UPDATE memories_fts SET text = NEW.text, tags = NEW.tags
+        WHERE rowid = (SELECT key FROM memory_fts_keys WHERE id = OLD.id);
+    END;
+    CREATE TRIGGER memories_fts_ad AFTER DELETE ON memories BEGIN
+      DELETE FROM memories_fts WHERE rowid = (SELECT key FROM memory_fts_keys WHERE id = OLD.id);
+      DELETE FROM memory_fts_keys WHERE id = OLD.id;
+    END;
+    INSERT INTO memory_fts_keys (id) SELECT id FROM memories;
+    INSERT INTO memories_fts (rowid, text, tags) SELECT k.key, m.text, m.tags FROM memories m JOIN memory_fts_keys k USING(id);
+  `);
+}
+
+/**
+ * False when a keyword index object is missing, or the index and memories disagree on row
+ * counts: writes made past the triggers, or a REPLACE (which fires no delete trigger) leaving
+ * an orphaned index row.
+ */
+function keywordIndexIntact(db: BetterSqlite3.Database): boolean {
+  if (!hasObjects(db, ['memories_fts', 'memory_fts_keys', 'memories_fts_ai', 'memories_fts_au', 'memories_fts_ad'])) return false;
+  const rows = countRows(db, 'memories');
+  return countRows(db, 'memory_fts_keys') === rows && countRows(db, 'memories_fts') === rows;
+}
+
+function hasObjects(db: BetterSqlite3.Database, names: string[]): boolean {
+  const found = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN (${names.map(() => '?').join(',')})`).get(...names) as { n: number };
+  return found.n === names.length;
+}
+
+function countRows(db: BetterSqlite3.Database, table: string): number {
+  return (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 }
 
 export interface RepoRelationship {
@@ -79,6 +136,10 @@ export interface MemoryDb {
   /** Write the vector only if it was embedded from the row's current text and tags. False if the row changed or is gone. */
   putVectorIfCurrent(id: string, embedded: Embedded): boolean;
   searchVectors(queryVector: ArrayLike<number>, k: number, project?: string): VectorHit[];
+  /** Cosine scores for these ids, leaving out any whose vector is missing or outdated. */
+  scoreVectors(queryVector: ArrayLike<number>, ids: readonly string[]): Map<string, number>;
+  /** Ids of memories containing every word of the text (3+ characters, as substrings), else any identifier in it; best first. */
+  searchKeywords(text: string, k: number, project?: string): string[];
   /** Rows search can't find as they read now: no vector, or one embedded from other text or tags. */
   listUnsearchable(project?: string): UnsearchableRow[];
   /** The row as it reads now if it is still unsearchable, otherwise undefined. */
@@ -170,7 +231,12 @@ export function createMemoryDb(dbPath: string): MemoryDb {
       CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories
         BEGIN DELETE FROM memory_vectors WHERE id = OLD.id; END;
     `);
-    if ((db.pragma('user_version', { simple: true }) as number) < SCHEMA_VERSION) {
+    const version = db.pragma('user_version', { simple: true }) as number;
+    // Rebuilt, triggers included, whenever it is incomplete: a lost trigger would otherwise drift forever.
+    // Never on a newer schema, which may have changed these objects on purpose.
+    const repair = version <= SCHEMA_VERSION;
+    if (version < 2 || (repair && !keywordIndexIntact(db))) createKeywordIndex(db);
+    if (version < SCHEMA_VERSION) {
       db.pragma(`user_version = ${SCHEMA_VERSION}`);
     }
   }).immediate();
@@ -184,8 +250,9 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   const countStmt = db.prepare('SELECT COUNT(*) as count FROM memories');
   const evictStmt = db.prepare(`DELETE FROM memories WHERE id IN (${evictableSql})`);
   const getStmt = db.prepare('SELECT * FROM memories WHERE id = ?');
+  // Not OR REPLACE: a replace fires no delete triggers and would orphan the old keyword index row
   const insertStmt = db.prepare(`
-    INSERT OR REPLACE INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned, tags, load_with, ephemeral)
+    INSERT INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned, tags, load_with, ephemeral)
     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
   `);
   const putVectorStmt = db.prepare('INSERT OR REPLACE INTO memory_vectors (id, dim, source, vector) VALUES (?, ?, ?, ?)');
@@ -199,6 +266,10 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   // Bound as (project, durable): the scope storeTx dedups a new memory within
   const dedupScope = 'm.project IS ? AND NOT (? AND m.ephemeral = 1)';
   const dedupVectorsStmt = db.prepare(`SELECT v.id, v.vector FROM memory_vectors v JOIN memories m USING(id) WHERE v.dim = ? AND ${dedupScope}`);
+  const keywordSql = 'SELECT k.id FROM memories_fts f JOIN memory_fts_keys k ON k.key = f.rowid JOIN memories m ON m.id = k.id WHERE memories_fts MATCH ?';
+  const keywordStmt = db.prepare(`${keywordSql} ORDER BY bm25(memories_fts) LIMIT ?`);
+  const projectKeywordStmt = db.prepare(`${keywordSql} AND m.project = ? ORDER BY bm25(memories_fts) LIMIT ?`);
+  const vectorStmt = db.prepare('SELECT vector FROM memory_vectors WHERE id = ? AND dim = ?');
   const sameTextStmt = db.prepare(`${sourcesSql} WHERE m.text = ? AND ${dedupScope}`);
   type SourceRow = UnsearchableRow & { source: string | null };
   // Compared in JS so embedSource stays the only definition of what gets embedded
@@ -323,6 +394,26 @@ export function createMemoryDb(dbPath: string): MemoryDb {
 
     searchVectors(queryVector, k, project?) {
       return search(queryVector, k, project);
+    },
+
+    scoreVectors(queryVector, ids) {
+      const queryNorm = vectorNorm(queryVector);
+      const scores = new Map<string, number>();
+      for (const id of ids) {
+        const vec = vectorStmt.get(id, queryVector.length) as { vector: Buffer } | undefined;
+        const row = sourceStmt.get(id) as SourceRow | undefined;
+        if (vec && row && !unsearchable(row)) scores.set(id, cosine(queryVector, queryNorm, decodeVector(vec.vector)));
+      }
+      return scores;
+    },
+
+    searchKeywords(text, k, project?) {
+      if (k <= 0) return [];
+      for (const match of toFtsQueries(text)) {
+        const rows = (project ? projectKeywordStmt.all(match, project, k) : keywordStmt.all(match, k)) as { id: string }[];
+        if (rows.length > 0) return rows.map(r => r.id);
+      }
+      return [];
     },
 
     listUnsearchable(project?) {

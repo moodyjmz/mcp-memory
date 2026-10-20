@@ -70,6 +70,14 @@ describe('memory-index over SQLite', () => {
       .toEqual({ stored: false, id: 'legacy-p1', existing: 'the build needs node 22' });
   });
 
+  it('ranks a memory containing an exact identifier first, with its cosine score', async () => {
+    for (const text of ['alpha', 'bravo']) await index.addFact({ text, category: 'gotcha', project: 'p1' });
+    const { id } = await index.addFact({ text: 'the limiter returns E_QUOTA_429 on burst', category: 'gotcha', project: 'p1' });
+    const [top, ...rest] = await index.queryFacts('E_QUOTA_429', 5, 'p1');
+    expect(top).toMatchObject({ id, keyword: true, score: expect.any(Number) });
+    expect(rest.every(h => !h.keyword && typeof h.score === 'number')).toBe(true);
+  });
+
   it('queries by similarity, filtered by project and limited to topK', async () => {
     for (const text of ['alpha', 'bravo', 'charlie']) await index.addFact({ text, category: 'gotcha', project: 'p1' });
     await index.addFact({ text: 'delta', category: 'gotcha', project: 'p2' });
@@ -144,15 +152,17 @@ describe('memory-index over SQLite', () => {
   });
 
   it('does not dedup or match against a vector the memory has outgrown', async () => {
-    const { id } = await index.addFact({ text: 'fact A', category: 'gotcha' });
+    const { id } = await index.addFact({ text: 'alpha wording', category: 'gotcha' });
     // An older server edits the text without touching the vector
-    raw.prepare("UPDATE memories SET text = 'fact B' WHERE id = ?").run(id);
-    expect((await index.queryFacts('fact A', 5)).map(h => h.id)).not.toContain(id);
-    const again = await index.addFact({ text: 'fact A', category: 'gotcha' });
+    raw.prepare("UPDATE memories SET text = 'bravo phrasing' WHERE id = ?").run(id);
+    expect((await index.queryFacts('alpha wording', 5)).map(h => h.id)).not.toContain(id);
+    // Its current text is still found by keyword, without a score
+    expect(await index.queryFacts('bravo phrasing', 5)).toEqual([{ id, keyword: true }]);
+    const again = await index.addFact({ text: 'alpha wording', category: 'gotcha' });
     expect(again.stored).toBe(true);
     await index.heal();
-    const [hit] = await index.queryFacts('fact B', 1);
-    expect(hit).toMatchObject({ id });
+    const [hit] = await index.queryFacts('bravo phrasing', 1);
+    expect(hit).toMatchObject({ id, score: expect.closeTo(1, 6), keyword: true });
   });
 
   it('refuses the exact text of a memory that has no vector yet', async () => {

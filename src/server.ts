@@ -26,7 +26,7 @@ async function main(): Promise<void> {
 
   const unsearchable = db.listUnsearchable().length;
   if (unsearchable > 0) {
-    console.error(`claude-memory: ${unsearchable} memories are not searchable yet; re-embedding them in the background`);
+    console.error(`claude-memory: ${unsearchable} memories can only be found by keyword until they are re-embedded; re-embedding them in the background`);
   }
 
   // Warm the embedding model in background, then heal what older versions or other sessions left unsearchable

@@ -30,7 +30,7 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 |------|-------------|
 | `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold) within the same project. Captures git SHA for file-linked memories. Auto-detects project from git root. Accepts optional `tags` and `load_with` arrays. |
 | `memory_update` | Amend an existing memory — update text, tags, category, file_path, pinned, or load_with without deleting and re-creating. Re-embeds automatically if text or tags change. |
-| `memory_query` | Semantic search. Returns `{ results, also_relevant }` — results are top-K semantic matches with staleness flags; also_relevant are tag-matched memories not in the main results (often causally related). Accepts `file_path` to auto-detect project (mirrors `memory_store`). Adds a `warning` while any memories in scope are not searchable yet. |
+| `memory_query` | Semantic and keyword search, fused by rank. Returns `{ results, also_relevant }` — results are the top-K matches with staleness flags, a cosine `score`, and `keyword_match` when the memory contains every word of the query or one of its identifiers; also_relevant are tag-matched memories not in the main results (often causally related). Accepts `file_path` to auto-detect project (mirrors `memory_store`). Adds a `warning` while any memories in scope can only be found by keyword. |
 | `memory_graph` | Compact table-of-contents of all project memories grouped by category, with 120-char excerpts, tags, and load_with. Use at session start to see everything that exists before querying. |
 | `memory_list` | List memories filtered by category and/or project. Returns full rows. |
 | `memory_forget` | Remove a memory and its vector by ID. |
@@ -51,7 +51,7 @@ Use `repo_link` to record how projects relate — e.g. "core-lib provides shared
 
 ### Tags
 
-`memory_store` and `memory_update` accept an optional `tags` array of keywords to improve search discoverability. Tags are embedded alongside the memory text into the vector, so semantic queries matching tag terms score higher — even when those words don't appear in the memory itself. They also drive `also_relevant` in `memory_query`.
+`memory_store` and `memory_update` accept an optional `tags` array of keywords to improve search discoverability. Tags are embedded alongside the memory text into the vector and indexed for keyword search, so queries matching tag terms score higher — even when those words don't appear in the memory itself. They also drive `also_relevant` in `memory_query`.
 
 ```json
 {
@@ -225,9 +225,9 @@ Every Claude session runs its own server process, and all of them share `memory.
 
 1. **Store**: Text plus tags is embedded locally first. Then one transaction checks the best match in the same project, ignoring ephemerals when the new memory is durable (cosine > 0.85 = duplicate; a memory not yet re-embedded counts as a duplicate only on identical text), inserts the memory and its vector, and evicts if over the limit, never the new memory.
 2. **Update**: Fields update in place. If text or tags change, the vector is re-embedded and written in the same transaction, but only if the memory still reads as it did when embedding started.
-3. **Query**: Input is embedded and scored against every stored vector (optionally filtered by project) by cosine similarity, skipping vectors embedded from text a memory no longer has; the matching rows add metadata and staleness. Tag-based `also_relevant` is computed from all project memories sharing tags with the results.
+3. **Query**: Input is embedded and scored against every stored vector (optionally filtered by project) by cosine similarity, skipping vectors embedded from text a memory no longer has. Separately, a SQLite FTS5 trigram index finds memories whose text or tags contain every query word of 3+ characters as a substring, or failing that any identifier in the query — exact identifiers, error codes and config keys the embedding model blurs. Matching any single word instead would let one shared common word outrank the best match by meaning. The two top-50 lists are merged by reciprocal rank fusion; the matching rows add metadata and staleness. Tag-based `also_relevant` is computed from all project memories sharing tags with the results.
 4. **Graph**: `memory_graph` lists all project memories grouped by category — no vector lookup needed.
-5. **Forget**: Deleting a memory deletes its vector (a SQLite trigger).
+5. **Forget**: Deleting a memory deletes its vector and its keyword index entry (SQLite triggers, so writes by any server version keep both in step).
 6. **Heal**: Memories with no vector, or one embedded from other text, are re-embedded in the background after startup and whenever a store, query or summary finds any.
 
 The embedding model (`Xenova/all-MiniLM-L6-v2`) runs locally — no API calls. It loads lazily on first use (~30MB download, cached after that).

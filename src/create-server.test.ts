@@ -129,8 +129,10 @@ describe('tools', () => {
     // A row with no vector, as an older server version leaves it
     db.insertMemory('legacy', 'stored before vectors moved', 'gotcha', null, null, P);
     const before = await client.call('memory_query', { text: 'stored before vectors moved', project: P });
-    expect(before.warning).toBe('1 memories are not searchable yet');
-    expect(before.results).toEqual([]);
+    expect(before.warning).toBe('1 memories can only be found by keyword until they are re-embedded');
+    expect(before.results).toHaveLength(1);
+    expect(before.results[0]).toMatchObject({ id: 'legacy', keyword_match: true });
+    expect(before.results[0]).not.toHaveProperty('score');
 
     await index.heal(); // joins the pass the query started
     const after = await client.call('memory_query', { text: 'stored before vectors moved', project: P });

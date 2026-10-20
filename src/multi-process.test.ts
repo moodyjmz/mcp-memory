@@ -93,6 +93,6 @@ describe('several server processes on one data dir', () => {
     raw = new Database(path.join(dataDir, 'memory.db'));
     const columns = (raw.prepare('PRAGMA table_info(memories)').all() as { name: string }[]).map(c => c.name);
     expect(columns).toEqual(expect.arrayContaining(['last_accessed', 'pinned', 'tags', 'load_with', 'ephemeral']));
-    expect(raw.pragma('user_version', { simple: true })).toBe(1);
+    expect(raw.pragma('user_version', { simple: true })).toBe(2);
   });
 });
