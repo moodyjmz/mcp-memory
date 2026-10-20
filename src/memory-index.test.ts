@@ -34,11 +34,40 @@ describe('memory-index over SQLite', () => {
     expect(sourceOf(res.id)).toBe('fact a, b');
   });
 
-  it('dedups across projects and against ephemerals', async () => {
-    const first = await index.addFact({ text: 'same', category: 'gotcha', project: 'p1', ephemeral: true });
-    const second = await index.addFact({ text: 'same', category: 'decision', project: 'p2' });
-    expect(second).toEqual({ stored: false, id: first.id, existing: 'same' });
-    expect(db.countMemories()).toBe(1);
+  it('dedups within a project', async () => {
+    const first = await index.addFact({ text: 'same', category: 'gotcha', project: 'p1' });
+    expect(await index.addFact({ text: 'same', category: 'decision', project: 'p1' }))
+      .toEqual({ stored: false, id: first.id, existing: 'same' });
+    const unscoped = await index.addFact({ text: 'same', category: 'gotcha' });
+    expect(await index.addFact({ text: 'same', category: 'decision' }))
+      .toEqual({ stored: false, id: unscoped.id, existing: 'same' });
+  });
+
+  it('stores the same fact in another project, where that project can find it', async () => {
+    await index.addFact({ text: 'use pnpm', category: 'convention', project: 'p1' });
+    const second = await index.addFact({ text: 'use pnpm', category: 'convention', project: 'p2' });
+    expect(second.stored).toBe(true);
+    expect(await index.addFact({ text: 'use pnpm', category: 'convention' })).toMatchObject({ stored: true });
+    expect((await index.queryFacts('use pnpm', 5, 'p2')).map(h => h.id)).toEqual([second.id]);
+  });
+
+  it('stores a durable memory over an ephemeral twin, and dedups an ephemeral against either', async () => {
+    const ephemeral = await index.addFact({ text: 'same', category: 'gotcha', project: 'p1', ephemeral: true });
+    expect(await index.addFact({ text: 'same', category: 'gotcha', project: 'p1', ephemeral: true }))
+      .toEqual({ stored: false, id: ephemeral.id, existing: 'same' });
+    const durable = await index.addFact({ text: 'same', category: 'gotcha', project: 'p1' });
+    expect(durable.stored).toBe(true);
+    db.clearEphemeralMemories('p1');
+    expect(db.getMemory(durable.id)).toBeDefined();
+  });
+
+  it('refuses the exact text of a vectorless memory only within the same scope', async () => {
+    db.insertMemory('legacy-p1', 'the build needs node 22', 'gotcha', null, null, 'p1');
+    db.insertMemory('legacy-eph', 'the build needs node 22', 'gotcha', null, null, 'p2', false, null, null, true);
+    expect(await index.addFact({ text: 'the build needs node 22', category: 'decision', project: 'p2' }))
+      .toMatchObject({ stored: true });
+    expect(await index.addFact({ text: 'the build needs node 22', category: 'decision', project: 'p1' }))
+      .toEqual({ stored: false, id: 'legacy-p1', existing: 'the build needs node 22' });
   });
 
   it('queries by similarity, filtered by project and limited to topK', async () => {

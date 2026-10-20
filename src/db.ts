@@ -12,7 +12,11 @@ import { EVICTION_EXEMPT_CATEGORIES } from './types.js';
 
 export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.claude-memory');
 
-/** A new memory whose top match scores above this is a duplicate. Global: every project, ephemerals included. */
+/**
+ * A new memory whose top match scores above this is a duplicate. Only memories of the same project
+ * count, so a project-scoped query never loses a fact to another project's copy; a durable memory
+ * ignores ephemerals, which are cleared at session end.
+ */
 export const DEDUP_THRESHOLD = 0.85;
 
 const SCHEMA_VERSION = 1;
@@ -192,7 +196,10 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   const sourcesStmt = db.prepare(sourcesSql);
   const projectSourcesStmt = db.prepare(`${sourcesSql} WHERE m.project = ?`);
   const sourceStmt = db.prepare(`${sourcesSql} WHERE m.id = ?`);
-  const sameTextStmt = db.prepare(`${sourcesSql} WHERE m.text = ?`);
+  // Bound as (project, durable): the scope storeTx dedups a new memory within
+  const dedupScope = 'm.project IS ? AND NOT (? AND m.ephemeral = 1)';
+  const dedupVectorsStmt = db.prepare(`SELECT v.id, v.vector FROM memory_vectors v JOIN memories m USING(id) WHERE v.dim = ? AND ${dedupScope}`);
+  const sameTextStmt = db.prepare(`${sourcesSql} WHERE m.text = ? AND ${dedupScope}`);
   type SourceRow = UnsearchableRow & { source: string | null };
   // Compared in JS so embedSource stays the only definition of what gets embedded
   const unsearchable = (r: SourceRow) => r.source !== embedSource(r.text, r.tags);
@@ -223,12 +230,8 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     db.prepare(`UPDATE memories SET ${setParts.join(', ')} WHERE id = ?`).run(...params);
   }
 
-  function search(queryVector: ArrayLike<number>, k: number, project?: string): VectorHit[] {
-    if (k <= 0) return [];
+  function rank(queryVector: ArrayLike<number>, rows: Array<{ id: string; vector: Buffer }>, k: number): VectorHit[] {
     const queryNorm = vectorNorm(queryVector);
-    const rows = (project
-      ? projectVectorsStmt.all(queryVector.length, project)
-      : vectorsStmt.all(queryVector.length)) as Array<{ id: string; vector: Buffer }>;
     const hits = rows
       .map(row => ({ id: row.id, score: cosine(queryVector, queryNorm, decodeVector(row.vector)) }))
       .sort((a, b) => b.score - a.score);
@@ -244,6 +247,14 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     return current;
   }
 
+  function search(queryVector: ArrayLike<number>, k: number, project?: string): VectorHit[] {
+    if (k <= 0) return [];
+    const rows = (project
+      ? projectVectorsStmt.all(queryVector.length, project)
+      : vectorsStmt.all(queryVector.length)) as Array<{ id: string; vector: Buffer }>;
+    return rank(queryVector, rows, k);
+  }
+
   /** Evict down to the limit, never the memory just stored (`keep`). */
   function evict(config: EvictionConfig, keep: string): number {
     const excess = (countStmt.get() as { count: number }).count - config.maxMemories;
@@ -252,12 +263,13 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   }
 
   const storeTx = db.transaction((memory: NewMemory, embedded: Embedded, eviction: EvictionConfig): StoreResult => {
-    const [top] = search(embedded.vector, 1);
+    const scope = [memory.project ?? null, memory.ephemeral ? 0 : 1];
+    const [top] = rank(embedded.vector, dedupVectorsStmt.all(embedded.vector.length, ...scope) as Array<{ id: string; vector: Buffer }>, 1);
     if (top && top.score > DEDUP_THRESHOLD) {
       return { stored: false, id: top.id, existing: (getStmt.get(top.id) as MemoryRow).text };
     }
     // Memories with no current vector are invisible to the check above; an identical text still counts
-    const twin = (sameTextStmt.all(memory.text) as SourceRow[]).find(unsearchable);
+    const twin = (sameTextStmt.all(memory.text, ...scope) as SourceRow[]).find(unsearchable);
     if (twin) return { stored: false, id: twin.id, existing: twin.text };
     const id = randomUUID();
     insertRow(id, memory.text, memory.category, memory.file_path, memory.git_sha, memory.project, memory.pinned, memory.tags, memory.load_with, memory.ephemeral);

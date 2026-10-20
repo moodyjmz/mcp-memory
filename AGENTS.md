@@ -96,7 +96,7 @@ Session-scoped. Shown in `session_state` at top of `memory_project_summary`. Cle
 - Use `npm ci --legacy-peer-deps` everywhere — `package-lock.json` locks deps, `--legacy-peer-deps` handles a peer conflict in the HuggingFace dep tree.
 - A write that touches a memory and its vector runs in one `BEGIN IMMEDIATE` transaction (`.immediate()`). Embed before opening it: better-sqlite3 transactions are synchronous, and other sessions wait on the lock.
 - Write a vector only while it matches the row's current text and tags (`putVectorIfCurrent`); another session may have edited the memory while it was being embedded.
-- Semantic dedup threshold is 0.85 cosine similarity (`DEDUP_THRESHOLD` in `db.ts`), global across projects. Lowering it causes false dedup; raising it allows near-duplicate memories.
+- Semantic dedup threshold is 0.85 cosine similarity (`DEDUP_THRESHOLD` in `db.ts`), within the new memory's project only; a durable memory never dedups against an ephemeral. Lowering it causes false dedup; raising it allows near-duplicate memories.
 
 ## Release
 

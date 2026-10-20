@@ -38,7 +38,7 @@ describe('tools', () => {
 
   it('memory_store rejects a semantic duplicate with the existing id', async () => {
     const first = await client.call('memory_store', { text: 'same fact', category: 'gotcha', project: P });
-    const second = await client.call('memory_store', { text: 'same fact', category: 'gotcha', project: 'https://example.test/other/repo' });
+    const second = await client.call('memory_store', { text: 'same fact', category: 'decision', project: P });
     expect(second).toMatchObject({ stored: false, existing: 'same fact', existing_id: first.id });
     expect(db.countMemories()).toBe(1);
   });

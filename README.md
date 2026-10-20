@@ -28,7 +28,7 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 
 | Tool | Description |
 |------|-------------|
-| `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold). Captures git SHA for file-linked memories. Auto-detects project from git root. Accepts optional `tags` and `load_with` arrays. |
+| `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold) within the same project. Captures git SHA for file-linked memories. Auto-detects project from git root. Accepts optional `tags` and `load_with` arrays. |
 | `memory_update` | Amend an existing memory — update text, tags, category, file_path, pinned, or load_with without deleting and re-creating. Re-embeds automatically if text or tags change. |
 | `memory_query` | Semantic search. Returns `{ results, also_relevant }` — results are top-K semantic matches with staleness flags; also_relevant are tag-matched memories not in the main results (often causally related). Accepts `file_path` to auto-detect project (mirrors `memory_store`). Adds a `warning` while any memories in scope are not searchable yet. |
 | `memory_graph` | Compact table-of-contents of all project memories grouped by category, with 120-char excerpts, tags, and load_with. Use at session start to see everything that exists before querying. |
@@ -223,7 +223,7 @@ Releases are cut automatically by the `release.yml` GitHub Actions workflow on e
 
 Every Claude session runs its own server process, and all of them share `memory.db`. SQLite's locking keeps them consistent: a memory stored in one session is immediately searchable, and deduplicated against, in every other.
 
-1. **Store**: Text plus tags is embedded locally first. Then one transaction checks the best match across all projects (cosine > 0.85 = duplicate; a memory not yet re-embedded counts as a duplicate only on identical text), inserts the memory and its vector, and evicts if over the limit, never the new memory.
+1. **Store**: Text plus tags is embedded locally first. Then one transaction checks the best match in the same project, ignoring ephemerals when the new memory is durable (cosine > 0.85 = duplicate; a memory not yet re-embedded counts as a duplicate only on identical text), inserts the memory and its vector, and evicts if over the limit, never the new memory.
 2. **Update**: Fields update in place. If text or tags change, the vector is re-embedded and written in the same transaction, but only if the memory still reads as it did when embedding started.
 3. **Query**: Input is embedded and scored against every stored vector (optionally filtered by project) by cosine similarity, skipping vectors embedded from text a memory no longer has; the matching rows add metadata and staleness. Tag-based `also_relevant` is computed from all project memories sharing tags with the results.
 4. **Graph**: `memory_graph` lists all project memories grouped by category — no vector lookup needed.
