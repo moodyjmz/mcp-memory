@@ -18,6 +18,10 @@ async function main(): Promise<void> {
   restrictToOwner(legacyIndex, [path.join(legacyIndex, 'index.json')]);
 
   const db = getDefaultDb();
+  if (db.upgradeBackup) {
+    const { path: backup, from, to } = db.upgradeBackup;
+    console.error(`claude-memory: backed up the database to ${backup} before upgrading it from schema ${from} to ${to}`);
+  }
   const index = createMemoryIndex(db, { eviction });
   const server = createServer({ db, index });
   const transport = new StdioServerTransport();

@@ -74,6 +74,11 @@ export interface ServerDeps {
 }
 
 export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }: ServerDeps): McpServer {
+  // Only this process knows it made the backup, so the first summary it serves says so
+  let upgradeNotice = db.upgradeBackup
+    ? `Tell the user: before upgrading the memory database from schema ${db.upgradeBackup.from} to ${db.upgradeBackup.to}, the server backed it up to ${db.upgradeBackup.path}. To roll back: stop every Claude session, install the older server version, delete memory.db-wal and memory.db-shm, then move the backup to memory.db. Memories stored since the upgrade are lost.`
+    : undefined;
+
   /** How many memories in scope search can't find yet; starts a background re-embed if any. */
   function unsearchable(project?: string): number {
     const count = db.listUnsearchable(project).length;
@@ -615,10 +620,14 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
       }
     }
 
+    const notice = upgradeNotice;
+    upgradeNotice = undefined;
+
     return {
       content: [{
         type: 'text' as const,
         text: JSON.stringify({
+          ...(notice ? { notice } : {}),
           project: resolvedProject,
           session_state: sessionState,
           total_memories: longTerm.length,

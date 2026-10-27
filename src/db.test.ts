@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, statSync, chmodSync, existsSync } from 'fs';
+import { mkdtempSync, rmSync, statSync, chmodSync, existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, symlinkSync, lstatSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
@@ -671,5 +671,113 @@ describe('updated_at', () => {
     expect(updatedAt('m1')).toBeNull();
     db.updateMemory('m1', { text: 'edited' });
     expect(updatedAt('m1')).not.toBeNull();
+  });
+});
+
+describe('backup before a schema upgrade', () => {
+  let dir: string;
+  const dbPath = () => path.join(dir, 'memory.db');
+  const backupPath = () => `${dbPath()}.pre-schema-3`;
+  const version = (file: string) => {
+    const raw = new Database(file, { readonly: true });
+    try {
+      return raw.pragma('user_version', { simple: true });
+    } finally {
+      raw.close();
+    }
+  };
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'claude-memory-backup-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A schema 2 file whose newest row is only in the WAL, as while a session holds it open */
+  function schemaTwo(): Database.Database {
+    createMemoryDb(dbPath()).close();
+    const live = new Database(dbPath());
+    live.pragma('wal_autocheckpoint = 0');
+    live.exec('DROP TRIGGER memories_au_stamp; ALTER TABLE memories DROP COLUMN updated_at; PRAGMA user_version = 2;');
+    live.prepare("INSERT INTO memories (id, text, category, created_at) VALUES ('m1', 'only in the WAL', 'gotcha', '2026-01-01T00:00:00.000Z')").run();
+    return live;
+  }
+
+  it('copies the old schema, rows still in the WAL included, before upgrading', () => {
+    const live = schemaTwo();
+    try {
+      expect(readFileSync(dbPath()).includes('only in the WAL')).toBe(false);
+      const db = createMemoryDb(dbPath());
+      expect(db.upgradeBackup).toEqual({ path: backupPath(), from: 2, to: 3 });
+      db.close();
+    } finally {
+      live.close();
+    }
+    const backup = new Database(backupPath(), { readonly: true });
+    expect(backup.pragma('user_version', { simple: true })).toBe(2);
+    expect(backup.prepare('SELECT text FROM memories').all()).toEqual([{ text: 'only in the WAL' }]);
+    expect(backup.prepare("SELECT name FROM sqlite_master WHERE name = 'memories_au_stamp'").get()).toBeUndefined();
+    backup.close();
+    expect(statSync(backupPath()).mode & 0o777).toBe(0o600);
+    expect(existsSync(`${backupPath()}.partial`)).toBe(false);
+    expect(version(dbPath())).toBe(3);
+  });
+
+  it('replaces an older backup with the file as it is now', () => {
+    schemaTwo().close();
+    createMemoryDb(dbPath()).close();
+    // Back on schema 2 with a change since, as after a restore or a failed upgrade
+    const raw = new Database(dbPath());
+    raw.exec("PRAGMA user_version = 2; UPDATE memories SET text = 'changed since'");
+    raw.close();
+    const db = createMemoryDb(dbPath());
+    expect(db.upgradeBackup).toEqual({ path: backupPath(), from: 2, to: 3 });
+    db.close();
+    const backup = new Database(backupPath(), { readonly: true });
+    expect(backup.prepare('SELECT text FROM memories').all()).toEqual([{ text: 'changed since' }]);
+    backup.close();
+  });
+
+  it('makes none for a new file, or one already on this schema or a newer one', () => {
+    for (const setVersion of [undefined, undefined, 99]) {
+      if (setVersion) {
+        const raw = new Database(dbPath());
+        raw.pragma(`user_version = ${setVersion}`);
+        raw.close();
+      }
+      const db = createMemoryDb(dbPath());
+      expect(db.upgradeBackup).toBeNull();
+      db.close();
+    }
+    expect(readdirSync(dir).filter(f => f.includes('pre-schema'))).toEqual([]);
+  });
+
+  it('writes a new owner-only file, not through a leftover or symlinked partial', () => {
+    schemaTwo().close();
+    const elsewhere = path.join(dir, 'elsewhere');
+    writeFileSync(elsewhere, 'untouched', { mode: 0o644 });
+    symlinkSync(elsewhere, `${backupPath()}.partial`);
+    createMemoryDb(dbPath()).close();
+    expect(readFileSync(elsewhere, 'utf8')).toBe('untouched');
+    expect(lstatSync(backupPath()).isFile()).toBe(true);
+    expect(statSync(backupPath()).mode & 0o777).toBe(0o600);
+  });
+
+  it('restricts existing backups to the owner on every open', () => {
+    schemaTwo().close();
+    createMemoryDb(dbPath()).close();
+    chmodSync(backupPath(), 0o644);
+    createMemoryDb(dbPath()).close();
+    expect(statSync(backupPath()).mode & 0o777).toBe(0o600);
+  });
+
+  it('refuses to upgrade when the backup cannot be written', () => {
+    schemaTwo().close();
+    mkdirSync(`${backupPath()}.partial`);
+    expect(() => createMemoryDb(dbPath())).toThrow(/could not back up .*, so it was not upgraded from schema 2 to 3/);
+    expect(version(dbPath())).toBe(2);
+    expect(existsSync(backupPath())).toBe(false);
   });
 });

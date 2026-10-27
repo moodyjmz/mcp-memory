@@ -108,6 +108,43 @@ function createEditStamp(db: BetterSqlite3.Database): void {
   `);
 }
 
+/**
+ * Copies the database as it is before an open upgrades its schema; restoring the copy is the
+ * rollback. Runs inside the upgrade's write lock, so no other process can upgrade first, and
+ * reads through SQLite, so rows still only in the WAL are included, which a file copy misses.
+ * Written under a temporary name and renamed, so a crash never leaves a truncated backup in
+ * place. An older backup is replaced: one left by a failed upgrade, or from before a restore,
+ * would miss everything written since.
+ */
+function backUpBeforeUpgrade(db: BetterSqlite3.Database, dbPath: string, from: number): string {
+  const backup = `${dbPath}.pre-schema-${SCHEMA_VERSION}`;
+  const partial = `${backup}.partial`;
+  try {
+    // A leftover from a crash, or a planted symlink: never write through it or inherit its mode
+    fs.rmSync(partial, { force: true });
+    const fd = fs.openSync(partial, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, db.serialize());
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(partial, backup);
+    // Otherwise a power cut can keep the upgrade's commit but lose the rename
+    const dirFd = fs.openSync(path.dirname(backup), 'r');
+    try {
+      fs.fsyncSync(dirFd);
+    } finally {
+      fs.closeSync(dirFd);
+    }
+  } catch (err) {
+    // A disk-full write would otherwise keep holding the space needed to retry
+    try { fs.unlinkSync(partial); } catch { /* nothing written */ }
+    throw new Error(`could not back up ${dbPath} to ${backup}, so it was not upgraded from schema ${from} to ${SCHEMA_VERSION}: ${(err as Error).message}`);
+  }
+  return backup;
+}
+
 function countRows(db: BetterSqlite3.Database, table: string): number {
   return (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 }
@@ -138,7 +175,15 @@ export interface UnsearchableRow {
   tags: string | null;
 }
 
+export interface UpgradeBackup {
+  path: string;
+  from: number;
+  to: number;
+}
+
 export interface MemoryDb {
+  /** The backup this open made before upgrading the schema; null if it upgraded nothing. */
+  readonly upgradeBackup: UpgradeBackup | null;
   insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned?: boolean, tags?: string | null, load_with?: string | null, ephemeral?: boolean): void;
   updateMemory(id: string, fields: MemoryUpdateFields): void;
   pinMemory(id: string): void;
@@ -179,10 +224,17 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   // One server process runs per Claude session, all on this file; writers wait up to 5s for each other
   const db: BetterSqlite3.Database = new Database(dbPath, { timeout: BUSY_TIMEOUT_MS });
   enableWal(db);
-  // SQLite gives new -wal/-shm files the db file's mode, but existing ones keep theirs
-  restrictToOwner(dir, [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]);
+  // SQLite gives new -wal/-shm files the db file's mode, but existing ones keep theirs; backups hold every memory too
+  const backups = fs.readdirSync(dir).filter(f => f.startsWith(`${path.basename(dbPath)}.pre-schema-`)).map(f => path.join(dir, f));
+  restrictToOwner(dir, [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, ...backups]);
 
+  let upgradeBackup: UpgradeBackup | null = null;
   db.transaction(() => {
+    const version = db.pragma('user_version', { simple: true }) as number;
+    // Before any DDL below, so the backup is the file as the older version left it. A new file has nothing to keep.
+    if (version < SCHEMA_VERSION && hasObjects(db, ['memories'])) {
+      upgradeBackup = { path: backUpBeforeUpgrade(db, dbPath, version), from: version, to: SCHEMA_VERSION };
+    }
     db.exec(`
       CREATE TABLE IF NOT EXISTS memories (
         id TEXT PRIMARY KEY,
@@ -250,7 +302,6 @@ export function createMemoryDb(dbPath: string): MemoryDb {
       CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories
         BEGIN DELETE FROM memory_vectors WHERE id = OLD.id; END;
     `);
-    const version = db.pragma('user_version', { simple: true }) as number;
     // Rebuilt, triggers included, whenever it is incomplete: a lost trigger would otherwise drift forever.
     // Never on a newer schema, which may have changed these objects on purpose.
     const repair = version <= SCHEMA_VERSION;
@@ -384,6 +435,8 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   });
 
   return {
+    upgradeBackup,
+
     insertMemory: insertRow,
 
     updateMemory: updateRow,

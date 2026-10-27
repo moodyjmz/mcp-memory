@@ -153,6 +153,20 @@ describe('tools', () => {
     expect((await client.call('memory_project_summary', { project: P })).unsearchable).toBeUndefined();
   });
 
+  it('memory_project_summary passes on a schema upgrade backup once', async () => {
+    const upgraded = await connectServer({ db: { ...db, upgradeBackup: { path: '/data/memory.db.pre-schema-3', from: 2, to: 3 } }, index });
+    try {
+      const first = await upgraded.call('memory_project_summary', { project: P });
+      expect(first.notice).toMatch(/^Tell the user: .*schema 2 to 3.*\/data\/memory\.db\.pre-schema-3/);
+      // Restoring over a live WAL replays it onto the backup or corrupts the file
+      expect(first.notice).toMatch(/stop every Claude session.*delete memory\.db-wal and memory\.db-shm, then move the backup/);
+      expect((await upgraded.call('memory_project_summary', { project: P })).notice).toBeUndefined();
+    } finally {
+      await upgraded.close();
+    }
+    expect((await client.call('memory_project_summary', { project: P })).notice).toBeUndefined();
+  });
+
   it('memory_store_file writes the note and stores a searchable pointer', async () => {
     const res = await client.call('memory_store_file', {
       name: 'findings', content: '# notes', pointer_text: 'where the findings live', category: 'architecture', project: P,
