@@ -18,6 +18,8 @@ It is installed as an MCP server in Claude Code's config via `npm run setup` (se
 | `src/db.ts` | SQLite layer — schema, migrations, CRUD, vectors, dedup (0.85 cosine, `DEDUP_THRESHOLD`), eviction. |
 | `src/memory-index.ts` | Embedding side — store, update, query, and `heal()` for unsearchable memories. |
 | `src/vectors.ts` | Vector encoding (Float32 BLOBs), cosine similarity, top-k. |
+| `src/fts-query.ts` | Free text → FTS5 MATCH expression; every term quoted, so no query syntax gets through. |
+| `src/rank-fusion.ts` | Reciprocal rank fusion of the vector and keyword result lists. |
 | `src/embed-source.ts` | `embedSource()`: the one definition of the string a memory is embedded from. |
 | `src/config.ts` | Environment config (`MEMORY_MAX_COUNT`). |
 | `src/embeddings.ts` | HuggingFace transformer embeddings (local). Model: `Xenova/all-MiniLM-L6-v2`. |
@@ -62,12 +64,13 @@ Opens a browser UI to invoke any tool manually without a full Claude Code sessio
 
 ### Storage
 
-One SQLite database (`db.ts`), two tables:
+One SQLite database (`db.ts`), three parts:
 
-- **`memories`** — all metadata (text, category, tags, pinned, ephemeral, load_with, file_path, git_sha, project, timestamps).
+- **`memories`** — all metadata (text, category, tags, pinned, ephemeral, load_with, file_path, git_sha, project, timestamps). `updated_at` is stamped by a trigger when text, tags, category or file_path change (schema version 3), so edits by any server version count.
 - **`memory_vectors`** — one Float32 vector per memory, plus `source`, the exact string it was embedded from (text + tags, see `embedSource()`). A separate table so `SELECT *` over `memories` never returns vectors. An `AFTER DELETE` trigger on `memories` drops the vector.
+- **`memories_fts`** + **`memory_fts_keys`** — FTS5 trigram keyword index over text and tags, keyed by a stable integer per memory (schema version 2). Triggers on `memories` keep it in sync, so older server versions on the same file keep it current. The tokenizer folds diacritics (`remove_diacritics 1`), so every process writing the file needs SQLite 3.45+ with FTS5. A trigger change needs a schema version bump that drops and recreates the set; on every open a missing index object or a row-count mismatch rebuilds the index, triggers included.
 
-On query: the input is embedded, every vector (optionally of one project) is scored by cosine similarity in JS, and the top-k rows are fetched. A memory is *unsearchable* when it has no vector or its `source` no longer matches its text and tags; `heal()` re-embeds those in the background.
+On query: the input is embedded, every vector (optionally of one project) is scored by cosine similarity in JS, the keyword index is searched for memories containing every query word, else any identifier in the query (`fts-query.ts` builds the MATCH expressions; every term is quoted), and the two top-50 lists are merged by reciprocal rank fusion (`rank-fusion.ts`). A memory is *unsearchable* when it has no vector or its `source` no longer matches its text and tags; `heal()` re-embeds those in the background.
 
 `vector_index/index.json` is the Vectra index used up to 4.0.0. Nothing reads or writes it now; it stays on disk as the rollback path.
 
@@ -96,7 +99,7 @@ Session-scoped. Shown in `session_state` at top of `memory_project_summary`. Cle
 - Use `npm ci --legacy-peer-deps` everywhere — `package-lock.json` locks deps, `--legacy-peer-deps` handles a peer conflict in the HuggingFace dep tree.
 - A write that touches a memory and its vector runs in one `BEGIN IMMEDIATE` transaction (`.immediate()`). Embed before opening it: better-sqlite3 transactions are synchronous, and other sessions wait on the lock.
 - Write a vector only while it matches the row's current text and tags (`putVectorIfCurrent`); another session may have edited the memory while it was being embedded.
-- Semantic dedup threshold is 0.85 cosine similarity (`DEDUP_THRESHOLD` in `db.ts`), global across projects. Lowering it causes false dedup; raising it allows near-duplicate memories.
+- Semantic dedup threshold is 0.85 cosine similarity (`DEDUP_THRESHOLD` in `db.ts`), within the new memory's project only; a durable memory never dedups against an ephemeral. Lowering it causes false dedup; raising it allows near-duplicate memories.
 
 ## Release
 

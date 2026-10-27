@@ -38,7 +38,7 @@ describe('tools', () => {
 
   it('memory_store rejects a semantic duplicate with the existing id', async () => {
     const first = await client.call('memory_store', { text: 'same fact', category: 'gotcha', project: P });
-    const second = await client.call('memory_store', { text: 'same fact', category: 'gotcha', project: 'https://example.test/other/repo' });
+    const second = await client.call('memory_store', { text: 'same fact', category: 'decision', project: P });
     expect(second).toMatchObject({ stored: false, existing: 'same fact', existing_id: first.id });
     expect(db.countMemories()).toBe(1);
   });
@@ -77,7 +77,13 @@ describe('tools', () => {
     const res = await client.call('memory_update', { id, text: 'new wording', pinned: true });
     expect(res).toMatchObject({ updated: true, id, text: 'new wording', pinned: true, re_embedded: true });
     const found = await client.call('memory_query', { text: 'new wording', project: P, topK: 1 });
-    expect(found.results[0]).toMatchObject({ id, score: 1 });
+    expect(found.results[0]).toMatchObject({ id, score: 1, updated: expect.any(String) });
+  });
+
+  it('memory_query leaves out updated for a memory never edited', async () => {
+    await client.call('memory_store', { text: 'never edited', category: 'gotcha', project: P });
+    const found = await client.call('memory_query', { text: 'never edited', project: P, topK: 1 });
+    expect(found.results[0]).not.toHaveProperty('updated');
   });
 
   it('memory_update without text or tag changes does not re-embed', async () => {
@@ -129,8 +135,10 @@ describe('tools', () => {
     // A row with no vector, as an older server version leaves it
     db.insertMemory('legacy', 'stored before vectors moved', 'gotcha', null, null, P);
     const before = await client.call('memory_query', { text: 'stored before vectors moved', project: P });
-    expect(before.warning).toBe('1 memories are not searchable yet');
-    expect(before.results).toEqual([]);
+    expect(before.warning).toBe('1 memories can only be found by keyword until they are re-embedded');
+    expect(before.results).toHaveLength(1);
+    expect(before.results[0]).toMatchObject({ id: 'legacy', keyword_match: true });
+    expect(before.results[0]).not.toHaveProperty('score');
 
     await index.heal(); // joins the pass the query started
     const after = await client.call('memory_query', { text: 'stored before vectors moved', project: P });
@@ -143,6 +151,20 @@ describe('tools', () => {
     expect((await client.call('memory_project_summary', { project: P })).unsearchable).toBe(1);
     await index.heal();
     expect((await client.call('memory_project_summary', { project: P })).unsearchable).toBeUndefined();
+  });
+
+  it('memory_project_summary passes on a schema upgrade backup once', async () => {
+    const upgraded = await connectServer({ db: { ...db, upgradeBackup: { path: '/data/memory.db.pre-schema-3', from: 2, to: 3 } }, index });
+    try {
+      const first = await upgraded.call('memory_project_summary', { project: P });
+      expect(first.notice).toMatch(/^Tell the user: .*schema 2 to 3.*\/data\/memory\.db\.pre-schema-3/);
+      // Restoring over a live WAL replays it onto the backup or corrupts the file
+      expect(first.notice).toMatch(/stop every Claude session.*delete memory\.db-wal and memory\.db-shm, then move the backup/);
+      expect((await upgraded.call('memory_project_summary', { project: P })).notice).toBeUndefined();
+    } finally {
+      await upgraded.close();
+    }
+    expect((await client.call('memory_project_summary', { project: P })).notice).toBeUndefined();
   });
 
   it('memory_store_file writes the note and stores a searchable pointer', async () => {

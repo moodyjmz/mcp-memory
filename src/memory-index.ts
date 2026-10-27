@@ -1,11 +1,22 @@
 import { embed as defaultEmbed } from './embeddings.js';
 import { embedSource } from './embed-source.js';
 import type { MemoryDb, MemoryUpdateFields } from './db.js';
-import type { VectorHit } from './vectors.js';
+import { fuseRanks } from './rank-fusion.js';
 import { DEFAULT_EVICTION_CONFIG } from './types.js';
 import type { NewMemory, StoreResult, EvictionConfig } from './types.js';
 
 type EmbedFn = (text: string) => Promise<ArrayLike<number>>;
+
+/** How many of the best vector and keyword matches go into the fusion. */
+const CANDIDATES = 50;
+
+export interface QueryHit {
+  id: string;
+  /** Cosine similarity; absent while the memory's vector is outdated or missing */
+  score?: number;
+  /** Among the best keyword matches: the memory contains every word of the query, or one of its identifiers */
+  keyword: boolean;
+}
 
 /**
  * Semantic operations over the SQLite store. Embedding is slow and async, so it
@@ -15,7 +26,8 @@ export interface MemoryIndex {
   addFact(memory: NewMemory): Promise<StoreResult>;
   /** Apply the update, re-embedding when text or tags change. Returns whether a new vector was written. */
   updateFact(id: string, fields: MemoryUpdateFields): Promise<boolean>;
-  queryFacts(text: string, topK?: number, project?: string): Promise<VectorHit[]>;
+  /** Vector and keyword matches fused by rank. */
+  queryFacts(text: string, topK?: number, project?: string): Promise<QueryHit[]>;
   /**
    * Re-embed every unsearchable memory. One pass, one at a time per process; a
    * call while a pass runs gets that pass. Never rejects: failures are logged.
@@ -92,7 +104,15 @@ export function createMemoryIndex(
     },
 
     async queryFacts(text, topK = 5, project?) {
-      return db.searchVectors(await embed(text), topK, project);
+      const queryVector = await embed(text);
+      const candidates = Math.max(topK, CANDIDATES);
+      const semantic = db.searchVectors(queryVector, candidates, project);
+      const keyword = db.searchKeywords(text, candidates, project);
+      const ids = fuseRanks([semantic.map(h => h.id), keyword]).slice(0, topK);
+      const scores = new Map(semantic.map(h => [h.id, h.score]));
+      for (const [id, score] of db.scoreVectors(queryVector, ids.filter(id => !scores.has(id)))) scores.set(id, score);
+      const matched = new Set(keyword);
+      return ids.map(id => ({ id, ...(scores.has(id) ? { score: scores.get(id) } : {}), keyword: matched.has(id) }));
     },
 
     heal() {

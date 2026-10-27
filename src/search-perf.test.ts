@@ -30,3 +30,29 @@ describe('search at 10k memories', () => {
     expect(hits).toHaveLength(5);
   });
 });
+
+describe('keyword search at 10k memories', () => {
+  let dir: string;
+  let db: MemoryDb;
+
+  beforeAll(async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'claude-memory-perf-'));
+    await seedMemories(dir, 10_000);
+    db = createMemoryDb(path.join(dir, 'memory.db'));
+  });
+
+  afterAll(() => {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('matches common words across every project in under 500 ms', () => {
+    // Words every seeded memory contains: the worst case, each term matching all rows
+    const query = 'how some part codebase works about seed memory';
+    db.searchKeywords(query, 50);
+    const start = performance.now();
+    const hits = db.searchKeywords(query, 50);
+    expect(performance.now() - start).toBeLessThan(500);
+    expect(hits).toHaveLength(50);
+  });
+});

@@ -34,11 +34,48 @@ describe('memory-index over SQLite', () => {
     expect(sourceOf(res.id)).toBe('fact a, b');
   });
 
-  it('dedups across projects and against ephemerals', async () => {
-    const first = await index.addFact({ text: 'same', category: 'gotcha', project: 'p1', ephemeral: true });
-    const second = await index.addFact({ text: 'same', category: 'decision', project: 'p2' });
-    expect(second).toEqual({ stored: false, id: first.id, existing: 'same' });
-    expect(db.countMemories()).toBe(1);
+  it('dedups within a project', async () => {
+    const first = await index.addFact({ text: 'same', category: 'gotcha', project: 'p1' });
+    expect(await index.addFact({ text: 'same', category: 'decision', project: 'p1' }))
+      .toEqual({ stored: false, id: first.id, existing: 'same' });
+    const unscoped = await index.addFact({ text: 'same', category: 'gotcha' });
+    expect(await index.addFact({ text: 'same', category: 'decision' }))
+      .toEqual({ stored: false, id: unscoped.id, existing: 'same' });
+  });
+
+  it('stores the same fact in another project, where that project can find it', async () => {
+    await index.addFact({ text: 'use pnpm', category: 'convention', project: 'p1' });
+    const second = await index.addFact({ text: 'use pnpm', category: 'convention', project: 'p2' });
+    expect(second.stored).toBe(true);
+    expect(await index.addFact({ text: 'use pnpm', category: 'convention' })).toMatchObject({ stored: true });
+    expect((await index.queryFacts('use pnpm', 5, 'p2')).map(h => h.id)).toEqual([second.id]);
+  });
+
+  it('stores a durable memory over an ephemeral twin, and dedups an ephemeral against either', async () => {
+    const ephemeral = await index.addFact({ text: 'same', category: 'gotcha', project: 'p1', ephemeral: true });
+    expect(await index.addFact({ text: 'same', category: 'gotcha', project: 'p1', ephemeral: true }))
+      .toEqual({ stored: false, id: ephemeral.id, existing: 'same' });
+    const durable = await index.addFact({ text: 'same', category: 'gotcha', project: 'p1' });
+    expect(durable.stored).toBe(true);
+    db.clearEphemeralMemories('p1');
+    expect(db.getMemory(durable.id)).toBeDefined();
+  });
+
+  it('refuses the exact text of a vectorless memory only within the same scope', async () => {
+    db.insertMemory('legacy-p1', 'the build needs node 22', 'gotcha', null, null, 'p1');
+    db.insertMemory('legacy-eph', 'the build needs node 22', 'gotcha', null, null, 'p2', false, null, null, true);
+    expect(await index.addFact({ text: 'the build needs node 22', category: 'decision', project: 'p2' }))
+      .toMatchObject({ stored: true });
+    expect(await index.addFact({ text: 'the build needs node 22', category: 'decision', project: 'p1' }))
+      .toEqual({ stored: false, id: 'legacy-p1', existing: 'the build needs node 22' });
+  });
+
+  it('ranks a memory containing an exact identifier first, with its cosine score', async () => {
+    for (const text of ['alpha', 'bravo']) await index.addFact({ text, category: 'gotcha', project: 'p1' });
+    const { id } = await index.addFact({ text: 'the limiter returns E_QUOTA_429 on burst', category: 'gotcha', project: 'p1' });
+    const [top, ...rest] = await index.queryFacts('E_QUOTA_429', 5, 'p1');
+    expect(top).toMatchObject({ id, keyword: true, score: expect.any(Number) });
+    expect(rest.every(h => !h.keyword && typeof h.score === 'number')).toBe(true);
   });
 
   it('queries by similarity, filtered by project and limited to topK', async () => {
@@ -115,15 +152,17 @@ describe('memory-index over SQLite', () => {
   });
 
   it('does not dedup or match against a vector the memory has outgrown', async () => {
-    const { id } = await index.addFact({ text: 'fact A', category: 'gotcha' });
+    const { id } = await index.addFact({ text: 'alpha wording', category: 'gotcha' });
     // An older server edits the text without touching the vector
-    raw.prepare("UPDATE memories SET text = 'fact B' WHERE id = ?").run(id);
-    expect((await index.queryFacts('fact A', 5)).map(h => h.id)).not.toContain(id);
-    const again = await index.addFact({ text: 'fact A', category: 'gotcha' });
+    raw.prepare("UPDATE memories SET text = 'bravo phrasing' WHERE id = ?").run(id);
+    expect((await index.queryFacts('alpha wording', 5)).map(h => h.id)).not.toContain(id);
+    // Its current text is still found by keyword, without a score
+    expect(await index.queryFacts('bravo phrasing', 5)).toEqual([{ id, keyword: true }]);
+    const again = await index.addFact({ text: 'alpha wording', category: 'gotcha' });
     expect(again.stored).toBe(true);
     await index.heal();
-    const [hit] = await index.queryFacts('fact B', 1);
-    expect(hit).toMatchObject({ id });
+    const [hit] = await index.queryFacts('bravo phrasing', 1);
+    expect(hit).toMatchObject({ id, score: expect.closeTo(1, 6), keyword: true });
   });
 
   it('refuses the exact text of a memory that has no vector yet', async () => {

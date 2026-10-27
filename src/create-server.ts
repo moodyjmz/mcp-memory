@@ -74,6 +74,11 @@ export interface ServerDeps {
 }
 
 export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }: ServerDeps): McpServer {
+  // Only this process knows it made the backup, so the first summary it serves says so
+  let upgradeNotice = db.upgradeBackup
+    ? `Tell the user: before upgrading the memory database from schema ${db.upgradeBackup.from} to ${db.upgradeBackup.to}, the server backed it up to ${db.upgradeBackup.path}. To roll back: stop every Claude session, install the older server version, delete memory.db-wal and memory.db-shm, then move the backup to memory.db. Memories stored since the upgrade are lost.`
+    : undefined;
+
   /** How many memories in scope search can't find yet; starts a background re-embed if any. */
   function unsearchable(project?: string): number {
     const count = db.listUnsearchable(project).length;
@@ -98,7 +103,7 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
       file_path: z.string().max(LIMITS.path).optional().describe('Related file path. Converted to relative (portable) on storage. Enables staleness detection.'),
       project: z.string().max(LIMITS.project).optional().describe('Project identifier for multi-project filtering'),
       pinned: z.boolean().optional().describe('Pin this memory so it is never evicted. Use for user-provided preferences and permanent facts.'),
-      tags: z.array(z.string().max(LIMITS.tag)).max(LIMITS.tags).optional().describe('Keywords/tags to improve search discoverability. These are embedded alongside the text for semantic matching.'),
+      tags: z.array(z.string().max(LIMITS.tag)).max(LIMITS.tags).optional().describe('Keywords/tags to improve search discoverability. These are embedded with the text and keyword-indexed.'),
       load_with: z.array(z.string().max(LIMITS.id)).max(LIMITS.ids).optional().describe('IDs of other memories that should always surface alongside this one. Use when two facts are only useful together.'),
       ephemeral: z.boolean().optional().describe('Mark as session-scoped working state (docker topology, current task spec, validated commands). Shown at top of memory_project_summary. Cleared at session end unless promoted via memory_update.'),
     },
@@ -165,7 +170,7 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
   // ─── memory_query ────────────────────────────────────────────────────────────
 
   server.registerTool('memory_query', {
-    description: 'Search memories by semantic similarity. Returns the most relevant stored facts, with staleness flags for file-linked memories. Also returns also_relevant: memories sharing tags with the results but not semantically close enough to rank — these are often causally related facts you should read alongside the main results. also_relevant is only populated when a project is known (via project or file_path).',
+    description: 'Search memories by meaning and by keyword (exact identifiers, error codes, config keys), fused by rank. Returns the most relevant stored facts, with staleness flags for file-linked memories and keyword_match when a memory contains every query word or one of its identifiers. Also returns also_relevant: memories sharing tags with the results but not semantically close enough to rank — these are often causally related facts you should read alongside the main results. also_relevant is only populated when a project is known (via project or file_path).',
     inputSchema: {
       text: z.string().max(LIMITS.text).describe('What to search for'),
       topK: z.number().int().min(1).max(LIMITS.topK).optional().describe('Number of results to return (default 5)'),
@@ -194,10 +199,12 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
         id: r.id,
         text: row.text,
         category: row.category,
-        score: Math.round(r.score * 1000) / 1000,
+        ...(r.score !== undefined ? { score: Math.round(r.score * 1000) / 1000 } : {}),
+        ...(r.keyword ? { keyword_match: true } : {}),
         file_path: row.file_path || null,
         project: row.project || null,
         date: row.created_at,
+        ...(row.updated_at ? { updated: row.updated_at } : {}),
         tags: row.tags || null,
         load_with: row.load_with ? row.load_with.split(',').map(s => s.trim()) : null,
         stale: staleness.stale,
@@ -244,7 +251,7 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
         text: JSON.stringify({
           results: enriched,
           also_relevant: alsoRelevant,
-          ...(missing > 0 ? { warning: `${missing} memories are not searchable yet` } : {}),
+          ...(missing > 0 ? { warning: `${missing} memories can only be found by keyword until they are re-embedded` } : {}),
         }, null, 2),
       }],
     };
@@ -613,10 +620,14 @@ export function createServer({ db, index, notesRoot: getNotesRoot = notesRoot }:
       }
     }
 
+    const notice = upgradeNotice;
+    upgradeNotice = undefined;
+
     return {
       content: [{
         type: 'text' as const,
         text: JSON.stringify({
+          ...(notice ? { notice } : {}),
           project: resolvedProject,
           session_state: sessionState,
           total_memories: longTerm.length,

@@ -18,6 +18,10 @@ async function main(): Promise<void> {
   restrictToOwner(legacyIndex, [path.join(legacyIndex, 'index.json')]);
 
   const db = getDefaultDb();
+  if (db.upgradeBackup) {
+    const { path: backup, from, to } = db.upgradeBackup;
+    console.error(`claude-memory: backed up the database to ${backup} before upgrading it from schema ${from} to ${to}`);
+  }
   const index = createMemoryIndex(db, { eviction });
   const server = createServer({ db, index });
   const transport = new StdioServerTransport();
@@ -26,7 +30,7 @@ async function main(): Promise<void> {
 
   const unsearchable = db.listUnsearchable().length;
   if (unsearchable > 0) {
-    console.error(`claude-memory: ${unsearchable} memories are not searchable yet; re-embedding them in the background`);
+    console.error(`claude-memory: ${unsearchable} memories can only be found by keyword until they are re-embedded; re-embedding them in the background`);
   }
 
   // Warm the embedding model in background, then heal what older versions or other sessions left unsearchable
