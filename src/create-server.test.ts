@@ -196,6 +196,7 @@ describe('tools', () => {
   // zod counts string length in code points since 4.5; before that an emoji counted as two
   it('caps text length in code points, not UTF-16 units', async () => {
     const emoji = '😀';
+    // The only assertion that fails under UTF-16 counting; the rejections below pass either way
     const atCap = await client.call('memory_store', { text: emoji.repeat(LIMITS.text), category: 'gotcha', project: P });
     expect(atCap.stored).toBe(true);
     for (const text of [emoji.repeat(LIMITS.text + 1), 'x'.repeat(LIMITS.text + 1)]) {

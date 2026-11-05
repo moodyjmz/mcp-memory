@@ -266,7 +266,7 @@ On every start the server sets `umask 077` and chmods `~/.claude-memory/` to `07
 
 ### Input limits
 
-Every string and array argument has an upper bound (`src/limits.ts`): text 8,000 characters, notes content 512 KiB, 32 tags of 64 characters, 32 `load_with` IDs, and `topK` 1-50. Characters are Unicode code points, so an emoji counts as one; notes content is capped in bytes of UTF-8. Oversized input is rejected, not truncated. `src/limits.test.ts` fails when a single-line `z.string()`, `z.array()` or `z.number()` argument in `create-server.ts` has no `.max()` or `.regex()`.
+Every string and array argument has an upper bound (`src/limits.ts`): text 8,000 characters, notes content 512 KiB, 32 tags of 64 characters, 32 `load_with` IDs, and `topK` 1-50. Characters are Unicode code points, not UTF-16 units: 😀 counts as one, but flag, skin-tone and joined emoji count as several. Notes content is capped in bytes of UTF-8. Oversized input is rejected, not truncated. `src/limits.test.ts` fails when a single-line `z.string()`, `z.array()` or `z.number()` argument in `create-server.ts` has no `.max()` or `.regex()`.
 
 ## Dependencies
 
