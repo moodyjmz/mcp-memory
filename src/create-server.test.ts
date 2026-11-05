@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { openStore, connectServer, type TestClient } from './test-helpers.js';
+import { LIMITS } from './limits.js';
 import type { MemoryDb } from './db.js';
 import type { MemoryIndex } from './memory-index.js';
 
@@ -190,6 +191,17 @@ describe('tools', () => {
     const map = await client.call('repo_map', { project: 'app' });
     expect(map.map((r: { id: number }) => r.id)).toEqual([link.id]);
     expect(await client.call('repo_unlink', { id: link.id })).toEqual({ unlinked: true, id: link.id });
+  });
+
+  // zod counts string length in code points since 4.5; before that an emoji counted as two
+  it('caps text length in code points, not UTF-16 units', async () => {
+    const emoji = '😀';
+    // The only assertion that fails under UTF-16 counting; the rejections below pass either way
+    const atCap = await client.call('memory_store', { text: emoji.repeat(LIMITS.text), category: 'gotcha', project: P });
+    expect(atCap.stored).toBe(true);
+    for (const text of [emoji.repeat(LIMITS.text + 1), 'x'.repeat(LIMITS.text + 1)]) {
+      await expect(client.call('memory_store', { text, category: 'gotcha', project: P })).rejects.toThrow(`<=${LIMITS.text} characters`);
+    }
   });
 });
 
