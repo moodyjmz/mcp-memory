@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.0.2](https://github.com/moodyjmz/mcp-memory/compare/v4.0.1...v4.0.2) (2026-11-05)
+
+### Bug Fixes
+
+* 🐛 declare zod and pin its string limits to code points ([#135](https://github.com/moodyjmz/mcp-memory/issues/135)) ([5a6c44e](https://github.com/moodyjmz/mcp-memory/commit/5a6c44e528151f6beeace1b2fc15c121a03cce3e)), references [#130](https://github.com/moodyjmz/mcp-memory/issues/130)
+
 ## [4.0.1](https://github.com/moodyjmz/mcp-memory/compare/v4.0.0...v4.0.1) (2026-09-30)
 
 ### Bug Fixes
