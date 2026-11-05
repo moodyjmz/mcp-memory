@@ -20,6 +20,27 @@ jobs:
 
       - run: npm run build
 
+      # Restored after npm ci, which deletes node_modules; transformers caches the model there
+      - uses: actions/cache@v4
+        with:
+          path: node_modules/@huggingface/transformers/.cache
+          key: hf-model-all-MiniLM-L6-v2-${{ hashFiles('package-lock.json') }}
+          restore-keys: hf-model-all-MiniLM-L6-v2-
+
+      # The tests use a mock embedder, so this is the only step that loads onnxruntime and sharp on Linux
+      - name: Embed with the real model
+        run: |
+          node --input-type=module -e "
+            import { embed } from './dist/embeddings.js';
+            const v = await embed('runtime check');
+            const norm = Math.hypot(...v);
+            if (v.length !== 384 || !v.every(Number.isFinite) || Math.abs(norm - 1) > 1e-4) {
+              console.error('bad vector: length', v.length, 'norm', norm);
+              process.exit(1);
+            }
+            console.log('embedded', v.length, 'dims, norm', norm.toFixed(6));
+          "
+
       - run: npm run test:coverage
 
       - uses: codecov/codecov-action@v5

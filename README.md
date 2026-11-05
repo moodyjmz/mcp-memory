@@ -272,8 +272,7 @@ Every string and array argument has an upper bound (`src/limits.ts`): text 8,000
 
 **Runtime:**
 - `@modelcontextprotocol/sdk` — MCP server framework
-- `@huggingface/transformers` — local embedding inference
-- `onnxruntime-node` — ONNX runtime for the embedding model
+- `@huggingface/transformers` — local embedding inference (pins its own `onnxruntime-node`)
 - `better-sqlite3` — SQLite bindings (memories and vectors)
 - `zod` — tool argument schemas and limits
 
