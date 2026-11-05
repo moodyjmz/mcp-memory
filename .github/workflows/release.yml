@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
 
+# Parallel runs race to push the release commit and tag; queue them instead.
+# Never cancel a run mid-release: it can leave a tag without a release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -12,6 +18,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # A queued run starts after earlier runs pushed release commits;
+          # releasing from the triggering SHA would be rejected as non-fast-forward.
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
@@ -36,5 +45,5 @@ jobs:
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-        # release-it exits non-zero when there are no releasable commits (no feat/fix since last tag)
-        run: npm run release -- --ci || echo "Nothing to release"
+        # With nothing releasable since the last tag, release-it logs "No new version to release" and exits 0
+        run: npm run release -- --ci
