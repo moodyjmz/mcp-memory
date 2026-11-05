@@ -102,9 +102,12 @@ Session-scoped. Shown in `session_state` at top of `memory_project_summary`. Cle
 
 The `release.yml` workflow fires on every push to `main`. It runs tests, then calls `npm run release -- --ci`, which:
 
-- Only releases when there are `feat:` or `fix:` commits since the last tag — `chore:`, `docs:`, etc. don't trigger a release
+- Only releases when there are `feat:`, `fix:`, `perf:` or `revert:` commits, or a breaking change, since the last tag. `chore:`, `docs:`, `ci:` and the rest log "No new version to release" and exit 0
+- Bumps minor for `feat:`, patch for the others, and major for `!` after the type or a `BREAKING CHANGE:` footer
 - Creates a git tag and GitHub release
-- Updates `CHANGELOG.md` (conventional changelog, angular preset)
+- Updates `CHANGELOG.md` (`conventionalcommits` preset, default types)
+
+Runs share one `concurrency` group, so they queue rather than race, and each checks out the latest `main`. Pushes landing while a release runs can still reject its push; that run fails red and the queued run releases. Keep the `conventionalcommits` preset: angular's bump logic releases a patch for any commit, and it ignores a `types` list.
 
 `npm.publish: false` in `.release-it.json` — this package isn't published to the npm registry at all (`claude-memory-mcp` there is an unrelated package). Installation is via `npm run setup` against a local clone; the git tag and GitHub release are the actual release artifact.
 
@@ -112,7 +115,7 @@ The `release.yml` workflow fires on every push to `main`. It runs tests, then ca
 
 - Restarting Claude Code is required to pick up a new `dist/` build — the MCP server process is long-lived.
 - `gh pr update-branch` can silently report "already up-to-date" when main has advanced. With `strict: true` branch protection this blocks merges. Fix: checkout the branch locally, `git merge origin/main`, push an empty commit to trigger CI.
-- The release bot (`release-it`) fires on every push to main — including dependabot merges. Each dep bump gets its own patch release. Consider gating releases manually if this becomes noisy.
+- Dependabot merges are `chore(deps):` and don't release. A security bump that needs a release goes out with the next `fix:`, or with its own `fix(deps):` commit.
 - After upgrading, every Claude session must restart: an old server process keeps running its old code against the shared database.
 
 ## Where future findings live
