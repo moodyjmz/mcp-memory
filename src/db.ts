@@ -7,15 +7,20 @@ import { randomUUID } from 'crypto';
 import { restrictToOwner } from './permissions.js';
 import { embedSource } from './embed-source.js';
 import { encodeVector, decodeVector, vectorNorm, cosine, type VectorHit } from './vectors.js';
+import { toFtsQueries } from './fts-query.js';
 import type { MemoryRow, MemoryCategory, EvictionConfig, NewMemory, Embedded, StoreResult } from './types.js';
 import { EVICTION_EXEMPT_CATEGORIES } from './types.js';
 
 export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.claude-memory');
 
-/** A new memory whose top match scores above this is a duplicate. Global: every project, ephemerals included. */
+/**
+ * A new memory whose top match scores above this is a duplicate. Only memories of the same project
+ * count, so a project-scoped query never loses a fact to another project's copy; a durable memory
+ * ignores ephemerals, which are cleared at session end.
+ */
 export const DEDUP_THRESHOLD = 0.85;
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
 const BUSY_TIMEOUT_MS = 5000;
 
 /**
@@ -34,6 +39,114 @@ function enableWal(db: BetterSqlite3.Database): void {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
     }
   }
+}
+
+/**
+ * Keyword index. It keeps its own copy of the text: memories has a TEXT key, and VACUUM may
+ * renumber the rowids an external-content table would point at. memory_fts_keys gives each
+ * memory a stable integer key for the FTS rowid, so a delete is a lookup, not a scan.
+ * Triggers keep it in sync, so server versions that predate it keep it current too; they are
+ * dropped and recreated (never IF NOT EXISTS) so a later schema version can change them.
+ */
+function createKeywordIndex(db: BetterSqlite3.Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS memories_fts_ai;
+    DROP TRIGGER IF EXISTS memories_fts_au;
+    DROP TRIGGER IF EXISTS memories_fts_ad;
+    DROP TABLE IF EXISTS memories_fts;
+    DROP TABLE IF EXISTS memory_fts_keys;
+    CREATE TABLE memory_fts_keys (key INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE);
+    -- remove_diacritics folds NFC, NFD and unaccented spellings together (macOS paths are NFD)
+    CREATE VIRTUAL TABLE memories_fts USING fts5(text, tags, tokenize = 'trigram remove_diacritics 1');
+    CREATE TRIGGER memories_fts_ai AFTER INSERT ON memories BEGIN
+      INSERT INTO memory_fts_keys (id) VALUES (NEW.id);
+      INSERT INTO memories_fts (rowid, text, tags)
+        VALUES ((SELECT key FROM memory_fts_keys WHERE id = NEW.id), NEW.text, NEW.tags);
+    END;
+    CREATE TRIGGER memories_fts_au AFTER UPDATE OF text, tags ON memories
+      WHEN NEW.text IS NOT OLD.text OR NEW.tags IS NOT OLD.tags BEGIN
+      UPDATE memories_fts SET text = NEW.text, tags = NEW.tags
+        WHERE rowid = (SELECT key FROM memory_fts_keys WHERE id = OLD.id);
+    END;
+    CREATE TRIGGER memories_fts_ad AFTER DELETE ON memories BEGIN
+      DELETE FROM memories_fts WHERE rowid = (SELECT key FROM memory_fts_keys WHERE id = OLD.id);
+      DELETE FROM memory_fts_keys WHERE id = OLD.id;
+    END;
+    INSERT INTO memory_fts_keys (id) SELECT id FROM memories;
+    INSERT INTO memories_fts (rowid, text, tags) SELECT k.key, m.text, m.tags FROM memories m JOIN memory_fts_keys k USING(id);
+  `);
+}
+
+/**
+ * False when a keyword index object is missing, or the index and memories disagree on row
+ * counts: writes made past the triggers, or a REPLACE (which fires no delete trigger) leaving
+ * an orphaned index row.
+ */
+function keywordIndexIntact(db: BetterSqlite3.Database): boolean {
+  if (!hasObjects(db, ['memories_fts', 'memory_fts_keys', 'memories_fts_ai', 'memories_fts_au', 'memories_fts_ad'])) return false;
+  const rows = countRows(db, 'memories');
+  return countRows(db, 'memory_fts_keys') === rows && countRows(db, 'memories_fts') === rows;
+}
+
+function hasObjects(db: BetterSqlite3.Database, names: string[]): boolean {
+  const found = db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN (${names.map(() => '?').join(',')})`).get(...names) as { n: number };
+  return found.n === names.length;
+}
+
+/**
+ * Stamps updated_at when a memory's content changes, in SQL so edits by any server version
+ * count. Its own UPDATE doesn't re-fire it: updated_at isn't in the OF list.
+ */
+function createEditStamp(db: BetterSqlite3.Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS memories_au_stamp;
+    CREATE TRIGGER memories_au_stamp AFTER UPDATE OF text, tags, category, file_path ON memories
+      WHEN NEW.text IS NOT OLD.text OR NEW.tags IS NOT OLD.tags
+        OR NEW.category IS NOT OLD.category OR NEW.file_path IS NOT OLD.file_path BEGIN
+      UPDATE memories SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = NEW.id;
+    END;
+  `);
+}
+
+/**
+ * Copies the database as it is before an open upgrades its schema; restoring the copy is the
+ * rollback. Runs inside the upgrade's write lock, so no other process can upgrade first, and
+ * reads through SQLite, so rows still only in the WAL are included, which a file copy misses.
+ * Written under a temporary name and renamed, so a crash never leaves a truncated backup in
+ * place. An older backup is replaced: one left by a failed upgrade, or from before a restore,
+ * would miss everything written since.
+ */
+function backUpBeforeUpgrade(db: BetterSqlite3.Database, dbPath: string, from: number): string {
+  const backup = `${dbPath}.pre-schema-${SCHEMA_VERSION}`;
+  const partial = `${backup}.partial`;
+  try {
+    // A leftover from a crash, or a planted symlink: never write through it or inherit its mode
+    fs.rmSync(partial, { force: true });
+    const fd = fs.openSync(partial, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, db.serialize());
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(partial, backup);
+    // Otherwise a power cut can keep the upgrade's commit but lose the rename
+    const dirFd = fs.openSync(path.dirname(backup), 'r');
+    try {
+      fs.fsyncSync(dirFd);
+    } finally {
+      fs.closeSync(dirFd);
+    }
+  } catch (err) {
+    // A disk-full write would otherwise keep holding the space needed to retry
+    try { fs.unlinkSync(partial); } catch { /* nothing written */ }
+    throw new Error(`could not back up ${dbPath} to ${backup}, so it was not upgraded from schema ${from} to ${SCHEMA_VERSION}: ${(err as Error).message}`);
+  }
+  return backup;
+}
+
+function countRows(db: BetterSqlite3.Database, table: string): number {
+  return (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 }
 
 export interface RepoRelationship {
@@ -62,7 +175,15 @@ export interface UnsearchableRow {
   tags: string | null;
 }
 
+export interface UpgradeBackup {
+  path: string;
+  from: number;
+  to: number;
+}
+
 export interface MemoryDb {
+  /** The backup this open made before upgrading the schema; null if it upgraded nothing. */
+  readonly upgradeBackup: UpgradeBackup | null;
   insertMemory(id: string, text: string, category: MemoryCategory, file_path?: string | null, git_sha?: string | null, project?: string | null, pinned?: boolean, tags?: string | null, load_with?: string | null, ephemeral?: boolean): void;
   updateMemory(id: string, fields: MemoryUpdateFields): void;
   pinMemory(id: string): void;
@@ -75,6 +196,10 @@ export interface MemoryDb {
   /** Write the vector only if it was embedded from the row's current text and tags. False if the row changed or is gone. */
   putVectorIfCurrent(id: string, embedded: Embedded): boolean;
   searchVectors(queryVector: ArrayLike<number>, k: number, project?: string): VectorHit[];
+  /** Cosine scores for these ids, leaving out any whose vector is missing or outdated. */
+  scoreVectors(queryVector: ArrayLike<number>, ids: readonly string[]): Map<string, number>;
+  /** Ids of memories containing every word of the text (3+ characters, as substrings), else any identifier in it; best first. */
+  searchKeywords(text: string, k: number, project?: string): string[];
   /** Rows search can't find as they read now: no vector, or one embedded from other text or tags. */
   listUnsearchable(project?: string): UnsearchableRow[];
   /** The row as it reads now if it is still unsearchable, otherwise undefined. */
@@ -99,10 +224,17 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   // One server process runs per Claude session, all on this file; writers wait up to 5s for each other
   const db: BetterSqlite3.Database = new Database(dbPath, { timeout: BUSY_TIMEOUT_MS });
   enableWal(db);
-  // SQLite gives new -wal/-shm files the db file's mode, but existing ones keep theirs
-  restrictToOwner(dir, [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]);
+  // SQLite gives new -wal/-shm files the db file's mode, but existing ones keep theirs; backups hold every memory too
+  const backups = fs.readdirSync(dir).filter(f => f.startsWith(`${path.basename(dbPath)}.pre-schema-`)).map(f => path.join(dir, f));
+  restrictToOwner(dir, [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, ...backups]);
 
+  let upgradeBackup: UpgradeBackup | null = null;
   db.transaction(() => {
+    const version = db.pragma('user_version', { simple: true }) as number;
+    // Before any DDL below, so the backup is the file as the older version left it. A new file has nothing to keep.
+    if (version < SCHEMA_VERSION && hasObjects(db, ['memories'])) {
+      upgradeBackup = { path: backUpBeforeUpgrade(db, dbPath, version), from: version, to: SCHEMA_VERSION };
+    }
     db.exec(`
       CREATE TABLE IF NOT EXISTS memories (
         id TEXT PRIMARY KEY,
@@ -116,7 +248,8 @@ export function createMemoryDb(dbPath: string): MemoryDb {
         pinned INTEGER NOT NULL DEFAULT 0,
         tags TEXT,
         load_with TEXT,
-        ephemeral INTEGER NOT NULL DEFAULT 0
+        ephemeral INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
       CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project);
@@ -152,6 +285,9 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     if (!columns.some(c => c.name === 'ephemeral')) {
       db.exec('ALTER TABLE memories ADD COLUMN ephemeral INTEGER NOT NULL DEFAULT 0');
     }
+    if (!columns.some(c => c.name === 'updated_at')) {
+      db.exec('ALTER TABLE memories ADD COLUMN updated_at TEXT');
+    }
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_memories_ephemeral ON memories(ephemeral);
 
@@ -166,7 +302,12 @@ export function createMemoryDb(dbPath: string): MemoryDb {
       CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories
         BEGIN DELETE FROM memory_vectors WHERE id = OLD.id; END;
     `);
-    if ((db.pragma('user_version', { simple: true }) as number) < SCHEMA_VERSION) {
+    // Rebuilt, triggers included, whenever it is incomplete: a lost trigger would otherwise drift forever.
+    // Never on a newer schema, which may have changed these objects on purpose.
+    const repair = version <= SCHEMA_VERSION;
+    if (version < 2 || (repair && !keywordIndexIntact(db))) createKeywordIndex(db);
+    if (version < 3 || (repair && !hasObjects(db, ['memories_au_stamp']))) createEditStamp(db);
+    if (version < SCHEMA_VERSION) {
       db.pragma(`user_version = ${SCHEMA_VERSION}`);
     }
   }).immediate();
@@ -180,8 +321,9 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   const countStmt = db.prepare('SELECT COUNT(*) as count FROM memories');
   const evictStmt = db.prepare(`DELETE FROM memories WHERE id IN (${evictableSql})`);
   const getStmt = db.prepare('SELECT * FROM memories WHERE id = ?');
+  // Not OR REPLACE: a replace fires no delete triggers and would orphan the old keyword index row
   const insertStmt = db.prepare(`
-    INSERT OR REPLACE INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned, tags, load_with, ephemeral)
+    INSERT INTO memories (id, text, category, file_path, git_sha, project, created_at, last_accessed, pinned, tags, load_with, ephemeral)
     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
   `);
   const putVectorStmt = db.prepare('INSERT OR REPLACE INTO memory_vectors (id, dim, source, vector) VALUES (?, ?, ?, ?)');
@@ -192,7 +334,14 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   const sourcesStmt = db.prepare(sourcesSql);
   const projectSourcesStmt = db.prepare(`${sourcesSql} WHERE m.project = ?`);
   const sourceStmt = db.prepare(`${sourcesSql} WHERE m.id = ?`);
-  const sameTextStmt = db.prepare(`${sourcesSql} WHERE m.text = ?`);
+  // Bound as (project, durable): the scope storeTx dedups a new memory within
+  const dedupScope = 'm.project IS ? AND NOT (? AND m.ephemeral = 1)';
+  const dedupVectorsStmt = db.prepare(`SELECT v.id, v.vector FROM memory_vectors v JOIN memories m USING(id) WHERE v.dim = ? AND ${dedupScope}`);
+  const keywordSql = 'SELECT k.id FROM memories_fts f JOIN memory_fts_keys k ON k.key = f.rowid JOIN memories m ON m.id = k.id WHERE memories_fts MATCH ?';
+  const keywordStmt = db.prepare(`${keywordSql} ORDER BY bm25(memories_fts) LIMIT ?`);
+  const projectKeywordStmt = db.prepare(`${keywordSql} AND m.project = ? ORDER BY bm25(memories_fts) LIMIT ?`);
+  const vectorStmt = db.prepare('SELECT vector FROM memory_vectors WHERE id = ? AND dim = ?');
+  const sameTextStmt = db.prepare(`${sourcesSql} WHERE m.text = ? AND ${dedupScope}`);
   type SourceRow = UnsearchableRow & { source: string | null };
   // Compared in JS so embedSource stays the only definition of what gets embedded
   const unsearchable = (r: SourceRow) => r.source !== embedSource(r.text, r.tags);
@@ -223,12 +372,8 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     db.prepare(`UPDATE memories SET ${setParts.join(', ')} WHERE id = ?`).run(...params);
   }
 
-  function search(queryVector: ArrayLike<number>, k: number, project?: string): VectorHit[] {
-    if (k <= 0) return [];
+  function rank(queryVector: ArrayLike<number>, rows: Array<{ id: string; vector: Buffer }>, k: number): VectorHit[] {
     const queryNorm = vectorNorm(queryVector);
-    const rows = (project
-      ? projectVectorsStmt.all(queryVector.length, project)
-      : vectorsStmt.all(queryVector.length)) as Array<{ id: string; vector: Buffer }>;
     const hits = rows
       .map(row => ({ id: row.id, score: cosine(queryVector, queryNorm, decodeVector(row.vector)) }))
       .sort((a, b) => b.score - a.score);
@@ -244,6 +389,14 @@ export function createMemoryDb(dbPath: string): MemoryDb {
     return current;
   }
 
+  function search(queryVector: ArrayLike<number>, k: number, project?: string): VectorHit[] {
+    if (k <= 0) return [];
+    const rows = (project
+      ? projectVectorsStmt.all(queryVector.length, project)
+      : vectorsStmt.all(queryVector.length)) as Array<{ id: string; vector: Buffer }>;
+    return rank(queryVector, rows, k);
+  }
+
   /** Evict down to the limit, never the memory just stored (`keep`). */
   function evict(config: EvictionConfig, keep: string): number {
     const excess = (countStmt.get() as { count: number }).count - config.maxMemories;
@@ -252,12 +405,13 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   }
 
   const storeTx = db.transaction((memory: NewMemory, embedded: Embedded, eviction: EvictionConfig): StoreResult => {
-    const [top] = search(embedded.vector, 1);
+    const scope = [memory.project ?? null, memory.ephemeral ? 0 : 1];
+    const [top] = rank(embedded.vector, dedupVectorsStmt.all(embedded.vector.length, ...scope) as Array<{ id: string; vector: Buffer }>, 1);
     if (top && top.score > DEDUP_THRESHOLD) {
       return { stored: false, id: top.id, existing: (getStmt.get(top.id) as MemoryRow).text };
     }
     // Memories with no current vector are invisible to the check above; an identical text still counts
-    const twin = (sameTextStmt.all(memory.text) as SourceRow[]).find(unsearchable);
+    const twin = (sameTextStmt.all(memory.text, ...scope) as SourceRow[]).find(unsearchable);
     if (twin) return { stored: false, id: twin.id, existing: twin.text };
     const id = randomUUID();
     insertRow(id, memory.text, memory.category, memory.file_path, memory.git_sha, memory.project, memory.pinned, memory.tags, memory.load_with, memory.ephemeral);
@@ -281,6 +435,8 @@ export function createMemoryDb(dbPath: string): MemoryDb {
   });
 
   return {
+    upgradeBackup,
+
     insertMemory: insertRow,
 
     updateMemory: updateRow,
@@ -311,6 +467,26 @@ export function createMemoryDb(dbPath: string): MemoryDb {
 
     searchVectors(queryVector, k, project?) {
       return search(queryVector, k, project);
+    },
+
+    scoreVectors(queryVector, ids) {
+      const queryNorm = vectorNorm(queryVector);
+      const scores = new Map<string, number>();
+      for (const id of ids) {
+        const vec = vectorStmt.get(id, queryVector.length) as { vector: Buffer } | undefined;
+        const row = sourceStmt.get(id) as SourceRow | undefined;
+        if (vec && row && !unsearchable(row)) scores.set(id, cosine(queryVector, queryNorm, decodeVector(vec.vector)));
+      }
+      return scores;
+    },
+
+    searchKeywords(text, k, project?) {
+      if (k <= 0) return [];
+      for (const match of toFtsQueries(text)) {
+        const rows = (project ? projectKeywordStmt.all(match, project, k) : keywordStmt.all(match, k)) as { id: string }[];
+        if (rows.length > 0) return rows.map(r => r.id);
+      }
+      return [];
     },
 
     listUnsearchable(project?) {

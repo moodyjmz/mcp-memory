@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, readdirSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
@@ -93,6 +93,12 @@ describe('several server processes on one data dir', () => {
     raw = new Database(path.join(dataDir, 'memory.db'));
     const columns = (raw.prepare('PRAGMA table_info(memories)').all() as { name: string }[]).map(c => c.name);
     expect(columns).toEqual(expect.arrayContaining(['last_accessed', 'pinned', 'tags', 'load_with', 'ephemeral']));
-    expect(raw.pragma('user_version', { simple: true })).toBe(1);
+    expect(raw.pragma('user_version', { simple: true })).toBe(3);
+    // One backup, taken before any of them changed the file
+    expect(readdirSync(dataDir).filter(f => f.includes('pre-schema'))).toEqual(['memory.db.pre-schema-3']);
+    const backup = new Database(path.join(dataDir, 'memory.db.pre-schema-3'), { readonly: true });
+    expect(backup.pragma('user_version', { simple: true })).toBe(0);
+    expect((backup.prepare('PRAGMA table_info(memories)').all() as { name: string }[]).map(c => c.name)).not.toContain('tags');
+    backup.close();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, statSync, chmodSync, existsSync } from 'fs';
+import { mkdtempSync, rmSync, statSync, chmodSync, existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, symlinkSync, lstatSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
@@ -358,16 +358,17 @@ describe('migrations', () => {
         CREATE TABLE memories (id TEXT PRIMARY KEY, text TEXT NOT NULL, category TEXT NOT NULL, file_path TEXT, git_sha TEXT,
           project TEXT, created_at TEXT NOT NULL, last_accessed TEXT, pinned INTEGER NOT NULL DEFAULT 0, tags TEXT, load_with TEXT,
           ephemeral INTEGER NOT NULL DEFAULT 0);
-        INSERT INTO memories (id, text, category, created_at) VALUES ('old', 'from v4', 'gotcha', '2026-01-01T00:00:00.000Z');
+        INSERT INTO memories (id, text, category, created_at) VALUES ('old', 'migrated from v4', 'gotcha', '2026-01-01T00:00:00.000Z');
       `);
       v4.close();
 
       createMemoryDb(dbPath).close();
       const db = createMemoryDb(dbPath); // a second open must be a no-op
       const raw = new Database(dbPath);
-      expect(raw.pragma('user_version', { simple: true })).toBe(1);
-      expect(raw.prepare("SELECT name FROM sqlite_master WHERE name IN ('memory_vectors', 'memories_ad')").all()).toHaveLength(2);
-      expect(db.getMemory('old')?.text).toBe('from v4');
+      expect(raw.pragma('user_version', { simple: true })).toBe(3);
+      expect(raw.prepare("SELECT name FROM sqlite_master WHERE name IN ('memory_vectors', 'memories_ad', 'memories_fts', 'memories_au_stamp')").all()).toHaveLength(4);
+      expect(db.searchKeywords('migrated', 5)).toEqual(['old']);
+      expect(db.getMemory('old')?.text).toBe('migrated from v4');
       expect(raw.prepare('SELECT COUNT(*) AS n FROM memory_vectors').get()).toEqual({ n: 0 });
       raw.close();
       db.close();
@@ -479,5 +480,304 @@ describe('data file permissions', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('keyword index', () => {
+  let db: MemoryDb;
+  let dir: string;
+  let raw: Database.Database;
+  const dbPath = () => path.join(dir, 'test.db');
+  const ftsCount = () => (raw.prepare('SELECT COUNT(*) AS n FROM memories_fts').get() as { n: number }).n;
+
+  beforeEach(() => {
+    ({ db, dir } = createTestDb());
+    raw = new Database(dbPath());
+  });
+
+  afterEach(() => {
+    raw.close();
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('finds a memory by a substring of its text or tags, filtered by project', () => {
+    db.insertMemory('m1', 'call onUploadAttachFile after upload', 'gotcha', null, null, 'p1');
+    db.insertMemory('m2', 'unrelated', 'gotcha', null, null, 'p2', false, 'quota, http 429');
+    expect(db.searchKeywords('AttachFile', 5)).toEqual(['m1']);
+    expect(db.searchKeywords('429', 5)).toEqual(['m2']);
+    expect(db.searchKeywords('429', 5, 'p1')).toEqual([]);
+    expect(db.searchKeywords('a b', 5)).toEqual([]);
+  });
+
+  it('stays in sync with writes made by plain SQL, as older server versions make them', () => {
+    raw.prepare("INSERT INTO memories (id, text, category, created_at) VALUES ('old', 'written by an older server', 'gotcha', '2026-01-01T00:00:00.000Z')").run();
+    expect(db.searchKeywords('older', 5)).toEqual(['old']);
+    raw.prepare("UPDATE memories SET text = 'edited elsewhere', tags = 'retagged' WHERE id = 'old'").run();
+    expect(db.searchKeywords('older', 5)).toEqual([]);
+    expect(db.searchKeywords('retagged', 5)).toEqual(['old']);
+    raw.prepare("DELETE FROM memories WHERE id = 'old'").run();
+    expect(db.searchKeywords('edited', 5)).toEqual([]);
+    expect(ftsCount()).toBe(0);
+  });
+
+  it('leaves the index alone when an update does not change text or tags', () => {
+    db.insertMemory('m1', 'stable text', 'gotcha', null, null, null, false, 'tag');
+    const before = raw.prepare('SELECT rowid FROM memories_fts').get();
+    db.updateMemory('m1', { tags: 'tag', pinned: true });
+    db.updateLastAccessed(['m1']);
+    expect(raw.prepare('SELECT rowid FROM memories_fts').get()).toEqual(before);
+  });
+
+  it('refuses to insert an id that already exists rather than replacing it', () => {
+    db.insertMemory('m1', 'first', 'gotcha');
+    expect(() => db.insertMemory('m1', 'second', 'gotcha')).toThrow(/UNIQUE/);
+    expect(db.searchKeywords('first', 5)).toEqual(['m1']);
+  });
+
+  it('rebuilds the index on open when rows were written past the triggers', () => {
+    db.insertMemory('m1', 'kept in the index', 'gotcha');
+    raw.exec('DELETE FROM memories_fts; DELETE FROM memory_fts_keys;');
+    db.close();
+    db = createMemoryDb(dbPath());
+    expect(db.searchKeywords('kept', 5)).toEqual(['m1']);
+  });
+
+  it('rebuilds an index left with an orphaned row by a REPLACE', () => {
+    db.insertMemory('m1', 'first wording', 'gotcha');
+    raw.prepare("INSERT OR REPLACE INTO memories (id, text, category, created_at) VALUES ('m1', 'second wording', 'gotcha', '2026-01-01T00:00:00.000Z')").run();
+    db.close();
+    db = createMemoryDb(dbPath());
+    expect(ftsCount()).toBe(1);
+    expect(db.searchKeywords('first', 5)).toEqual([]);
+    expect(db.searchKeywords('second', 5)).toEqual(['m1']);
+  });
+
+  it('recreates a missing trigger on open, so later edits stay indexed', () => {
+    db.insertMemory('m1', 'before', 'gotcha');
+    raw.exec('DROP TRIGGER memories_fts_au; DROP TRIGGER memories_au_stamp;');
+    db.close();
+    db = createMemoryDb(dbPath());
+    db.updateMemory('m1', { text: 'revised' });
+    expect(db.searchKeywords('revised', 5)).toEqual(['m1']);
+    expect(db.getMemory('m1')!.updated_at).not.toBeNull();
+  });
+
+  it('matches across accents and Unicode normalisation forms', () => {
+    db.insertMemory('nfd', 'Ordner Übersicht'.normalize('NFD'), 'gotcha');
+    db.insertMemory('nfc', 'Ordner Übersicht'.normalize('NFC'), 'gotcha');
+    for (const q of ['Übersicht'.normalize('NFC'), 'Übersicht'.normalize('NFD'), 'Ubersicht']) {
+      expect(db.searchKeywords(q, 5).sort()).toEqual(['nfc', 'nfd']);
+    }
+  });
+
+  it('migrates a v1 database by building the index from its rows', () => {
+    db.insertMemory('m1', 'from schema one', 'gotcha');
+    raw.exec('DROP TRIGGER memories_fts_ai; DROP TRIGGER memories_fts_au; DROP TRIGGER memories_fts_ad; DROP TABLE memories_fts; DROP TABLE memory_fts_keys; PRAGMA user_version = 1;');
+    db.close();
+    db = createMemoryDb(dbPath());
+    expect(raw.pragma('user_version', { simple: true })).toBe(3);
+    expect(db.searchKeywords('schema', 5)).toEqual(['m1']);
+  });
+
+  it('evicts a large batch without scanning the index per row', () => {
+    raw.transaction(() => {
+      const ins = raw.prepare("INSERT INTO memories (id, text, category, created_at) VALUES (?, ?, 'gotcha', '2026-01-01T00:00:00.000Z')");
+      for (let i = 0; i < 5000; i++) ins.run(`m${i}`, `memory number ${i} about some part of a codebase`.repeat(4));
+    })();
+    const vector = Array.from({ length: 384 }, (_, i) => (i === 0 ? 1 : 0));
+    const start = performance.now();
+    const res = db.storeMemory({ text: 'the one that stays', category: 'gotcha' }, { vector, source: 'the one that stays' }, { maxMemories: 1 });
+    // About 30 ms with keyed deletes; a delete that scans the index takes about a second
+    expect(performance.now() - start).toBeLessThan(250);
+    expect(res).toMatchObject({ stored: true, evicted: 5000 });
+    expect(ftsCount()).toBe(1);
+    expect(db.searchKeywords('stays', 5)).toEqual([res.id]);
+  });
+
+  it('needs every word of a sentence, so one shared common word is no match', () => {
+    db.insertMemory('sync', 'address book sync fails when the token expires', 'gotcha');
+    db.insertMemory('upload', 'large uploads fail behind the proxy unless the body size limit is raised', 'gotcha');
+    expect(db.searchKeywords('big file uploads fail', 5)).toEqual([]);
+    expect(db.searchKeywords('uploads fail proxy', 5)).toEqual(['upload']);
+  });
+
+  it('falls back to the identifiers in a query when not every word matches', () => {
+    db.insertMemory('quota', 'the limiter returns E_QUOTA_429 on burst', 'gotcha');
+    db.insertMemory('other', 'bursts are smoothed by the queue', 'gotcha');
+    expect(db.searchKeywords('why does E_QUOTA_429 happen', 5)).toEqual(['quota']);
+  });
+
+  it('leaves the index of a newer schema alone', () => {
+    raw.exec('DROP TRIGGER memories_fts_au; PRAGMA user_version = 99;');
+    db.close();
+    db = createMemoryDb(dbPath());
+    expect(raw.prepare("SELECT name FROM sqlite_master WHERE name = 'memories_fts_au'").get()).toBeUndefined();
+    expect(raw.pragma('user_version', { simple: true })).toBe(99);
+  });
+});
+
+describe('updated_at', () => {
+  let db: MemoryDb;
+  let dir: string;
+  let raw: Database.Database;
+  const updatedAt = (id: string) => db.getMemory(id)!.updated_at;
+
+  beforeEach(() => {
+    ({ db, dir } = createTestDb());
+    raw = new Database(path.join(dir, 'test.db'));
+  });
+
+  afterEach(() => {
+    raw.close();
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('is null until the content changes, then an ISO timestamp', () => {
+    db.insertMemory('m1', 'text', 'gotcha');
+    expect(updatedAt('m1')).toBeNull();
+    db.updateMemory('m1', { text: 'new text' });
+    expect(updatedAt('m1')).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(Date.now() - Date.parse(updatedAt('m1')!)).toBeLessThan(60_000);
+  });
+
+  it('counts tags, category and file_path as content', () => {
+    for (const [id, fields] of [['t', { tags: 'x' }], ['c', { category: 'decision' as const }], ['f', { file_path: 'a.ts' }]] as const) {
+      db.insertMemory(id, 'text', 'gotcha');
+      db.updateMemory(id, fields);
+      expect(updatedAt(id)).not.toBeNull();
+    }
+  });
+
+  it('ignores pinning, ephemeral, load_with, access and unchanged values', () => {
+    db.insertMemory('m1', 'text', 'gotcha', null, null, null, false, 'tag');
+    db.updateMemory('m1', { pinned: true, ephemeral: true, load_with: 'm2', tags: 'tag', text: 'text' });
+    db.updateLastAccessed(['m1']);
+    expect(updatedAt('m1')).toBeNull();
+  });
+
+  it('is stamped for edits made by plain SQL, as older server versions make them', () => {
+    db.insertMemory('m1', 'text', 'gotcha');
+    raw.prepare("UPDATE memories SET text = 'edited' WHERE id = 'm1'").run();
+    expect(updatedAt('m1')).not.toBeNull();
+  });
+
+  it('adds the column and trigger to a v2 database', () => {
+    db.insertMemory('m1', 'text', 'gotcha');
+    raw.exec('DROP TRIGGER memories_au_stamp; ALTER TABLE memories DROP COLUMN updated_at; PRAGMA user_version = 2;');
+    db.close();
+    db = createMemoryDb(path.join(dir, 'test.db'));
+    expect(updatedAt('m1')).toBeNull();
+    db.updateMemory('m1', { text: 'edited' });
+    expect(updatedAt('m1')).not.toBeNull();
+  });
+});
+
+describe('backup before a schema upgrade', () => {
+  let dir: string;
+  const dbPath = () => path.join(dir, 'memory.db');
+  const backupPath = () => `${dbPath()}.pre-schema-3`;
+  const version = (file: string) => {
+    const raw = new Database(file, { readonly: true });
+    try {
+      return raw.pragma('user_version', { simple: true });
+    } finally {
+      raw.close();
+    }
+  };
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'claude-memory-backup-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A schema 2 file whose newest row is only in the WAL, as while a session holds it open */
+  function schemaTwo(): Database.Database {
+    createMemoryDb(dbPath()).close();
+    const live = new Database(dbPath());
+    live.pragma('wal_autocheckpoint = 0');
+    live.exec('DROP TRIGGER memories_au_stamp; ALTER TABLE memories DROP COLUMN updated_at; PRAGMA user_version = 2;');
+    live.prepare("INSERT INTO memories (id, text, category, created_at) VALUES ('m1', 'only in the WAL', 'gotcha', '2026-01-01T00:00:00.000Z')").run();
+    return live;
+  }
+
+  it('copies the old schema, rows still in the WAL included, before upgrading', () => {
+    const live = schemaTwo();
+    try {
+      expect(readFileSync(dbPath()).includes('only in the WAL')).toBe(false);
+      const db = createMemoryDb(dbPath());
+      expect(db.upgradeBackup).toEqual({ path: backupPath(), from: 2, to: 3 });
+      db.close();
+    } finally {
+      live.close();
+    }
+    const backup = new Database(backupPath(), { readonly: true });
+    expect(backup.pragma('user_version', { simple: true })).toBe(2);
+    expect(backup.prepare('SELECT text FROM memories').all()).toEqual([{ text: 'only in the WAL' }]);
+    expect(backup.prepare("SELECT name FROM sqlite_master WHERE name = 'memories_au_stamp'").get()).toBeUndefined();
+    backup.close();
+    expect(statSync(backupPath()).mode & 0o777).toBe(0o600);
+    expect(existsSync(`${backupPath()}.partial`)).toBe(false);
+    expect(version(dbPath())).toBe(3);
+  });
+
+  it('replaces an older backup with the file as it is now', () => {
+    schemaTwo().close();
+    createMemoryDb(dbPath()).close();
+    // Back on schema 2 with a change since, as after a restore or a failed upgrade
+    const raw = new Database(dbPath());
+    raw.exec("PRAGMA user_version = 2; UPDATE memories SET text = 'changed since'");
+    raw.close();
+    const db = createMemoryDb(dbPath());
+    expect(db.upgradeBackup).toEqual({ path: backupPath(), from: 2, to: 3 });
+    db.close();
+    const backup = new Database(backupPath(), { readonly: true });
+    expect(backup.prepare('SELECT text FROM memories').all()).toEqual([{ text: 'changed since' }]);
+    backup.close();
+  });
+
+  it('makes none for a new file, or one already on this schema or a newer one', () => {
+    for (const setVersion of [undefined, undefined, 99]) {
+      if (setVersion) {
+        const raw = new Database(dbPath());
+        raw.pragma(`user_version = ${setVersion}`);
+        raw.close();
+      }
+      const db = createMemoryDb(dbPath());
+      expect(db.upgradeBackup).toBeNull();
+      db.close();
+    }
+    expect(readdirSync(dir).filter(f => f.includes('pre-schema'))).toEqual([]);
+  });
+
+  it('writes a new owner-only file, not through a leftover or symlinked partial', () => {
+    schemaTwo().close();
+    const elsewhere = path.join(dir, 'elsewhere');
+    writeFileSync(elsewhere, 'untouched', { mode: 0o644 });
+    symlinkSync(elsewhere, `${backupPath()}.partial`);
+    createMemoryDb(dbPath()).close();
+    expect(readFileSync(elsewhere, 'utf8')).toBe('untouched');
+    expect(lstatSync(backupPath()).isFile()).toBe(true);
+    expect(statSync(backupPath()).mode & 0o777).toBe(0o600);
+  });
+
+  it('restricts existing backups to the owner on every open', () => {
+    schemaTwo().close();
+    createMemoryDb(dbPath()).close();
+    chmodSync(backupPath(), 0o644);
+    createMemoryDb(dbPath()).close();
+    expect(statSync(backupPath()).mode & 0o777).toBe(0o600);
+  });
+
+  it('refuses to upgrade when the backup cannot be written', () => {
+    schemaTwo().close();
+    mkdirSync(`${backupPath()}.partial`);
+    expect(() => createMemoryDb(dbPath())).toThrow(/could not back up .*, so it was not upgraded from schema 2 to 3/);
+    expect(version(dbPath())).toBe(2);
+    expect(existsSync(backupPath())).toBe(false);
   });
 });

@@ -44,6 +44,7 @@ export interface MemoryRow {
   tags: string | null; // comma-separated tags for search enrichment
   load_with: string | null; // comma-separated memory IDs to auto-surface with this one
   ephemeral: number; // 0 or 1 — session-scoped, cleared at session end unless promoted
+  updated_at: string | null; // last change to text, tags, category or file_path; null if never edited
 }
 
 export interface StalenessResult {

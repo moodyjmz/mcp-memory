@@ -28,9 +28,9 @@ Data is stored in `~/.claude-memory/` (separate from source code):
 
 | Tool | Description |
 |------|-------------|
-| `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold). Captures git SHA for file-linked memories. Auto-detects project from git root. Accepts optional `tags` and `load_with` arrays. |
+| `memory_store` | Store a fact. Deduplicates via cosine similarity (0.85 threshold) within the same project. Captures git SHA for file-linked memories. Auto-detects project from git root. Accepts optional `tags` and `load_with` arrays. |
 | `memory_update` | Amend an existing memory — update text, tags, category, file_path, pinned, or load_with without deleting and re-creating. Re-embeds automatically if text or tags change. |
-| `memory_query` | Semantic search. Returns `{ results, also_relevant }` — results are top-K semantic matches with staleness flags; also_relevant are tag-matched memories not in the main results (often causally related). Accepts `file_path` to auto-detect project (mirrors `memory_store`). Adds a `warning` while any memories in scope are not searchable yet. |
+| `memory_query` | Semantic and keyword search, fused by rank. Returns `{ results, also_relevant }` — results are the top-K matches with staleness flags, a cosine `score`, `keyword_match` when the memory contains every word of the query or one of its identifiers, and `updated` once its text, tags, category or file path has been edited; also_relevant are tag-matched memories not in the main results (often causally related). Accepts `file_path` to auto-detect project (mirrors `memory_store`). Adds a `warning` while any memories in scope can only be found by keyword. |
 | `memory_graph` | Compact table-of-contents of all project memories grouped by category, with 120-char excerpts, tags, and load_with. Use at session start to see everything that exists before querying. |
 | `memory_list` | List memories filtered by category and/or project. Returns full rows. |
 | `memory_forget` | Remove a memory and its vector by ID. |
@@ -51,7 +51,7 @@ Use `repo_link` to record how projects relate — e.g. "core-lib provides shared
 
 ### Tags
 
-`memory_store` and `memory_update` accept an optional `tags` array of keywords to improve search discoverability. Tags are embedded alongside the memory text into the vector, so semantic queries matching tag terms score higher — even when those words don't appear in the memory itself. They also drive `also_relevant` in `memory_query`.
+`memory_store` and `memory_update` accept an optional `tags` array of keywords to improve search discoverability. Tags are embedded alongside the memory text into the vector and indexed for keyword search, so queries matching tag terms score higher — even when those words don't appear in the memory itself. They also drive `also_relevant` in `memory_query`.
 
 ```json
 {
@@ -223,11 +223,11 @@ Releases are cut automatically by the `release.yml` GitHub Actions workflow on e
 
 Every Claude session runs its own server process, and all of them share `memory.db`. SQLite's locking keeps them consistent: a memory stored in one session is immediately searchable, and deduplicated against, in every other.
 
-1. **Store**: Text plus tags is embedded locally first. Then one transaction checks the best match across all projects (cosine > 0.85 = duplicate; a memory not yet re-embedded counts as a duplicate only on identical text), inserts the memory and its vector, and evicts if over the limit, never the new memory.
+1. **Store**: Text plus tags is embedded locally first. Then one transaction checks the best match in the same project, ignoring ephemerals when the new memory is durable (cosine > 0.85 = duplicate; a memory not yet re-embedded counts as a duplicate only on identical text), inserts the memory and its vector, and evicts if over the limit, never the new memory.
 2. **Update**: Fields update in place. If text or tags change, the vector is re-embedded and written in the same transaction, but only if the memory still reads as it did when embedding started.
-3. **Query**: Input is embedded and scored against every stored vector (optionally filtered by project) by cosine similarity, skipping vectors embedded from text a memory no longer has; the matching rows add metadata and staleness. Tag-based `also_relevant` is computed from all project memories sharing tags with the results.
+3. **Query**: Input is embedded and scored against every stored vector (optionally filtered by project) by cosine similarity, skipping vectors embedded from text a memory no longer has. Separately, a SQLite FTS5 trigram index finds memories whose text or tags contain every query word of 3+ characters as a substring, or failing that any identifier in the query — exact identifiers, error codes and config keys the embedding model blurs. Matching any single word instead would let one shared common word outrank the best match by meaning. The two top-50 lists are merged by reciprocal rank fusion; the matching rows add metadata and staleness. Tag-based `also_relevant` is computed from all project memories sharing tags with the results.
 4. **Graph**: `memory_graph` lists all project memories grouped by category — no vector lookup needed.
-5. **Forget**: Deleting a memory deletes its vector (a SQLite trigger).
+5. **Forget**: Deleting a memory deletes its vector and its keyword index entry (SQLite triggers, so writes by any server version keep both in step).
 6. **Heal**: Memories with no vector, or one embedded from other text, are re-embedded in the background after startup and whenever a store, query or summary finds any.
 
 The embedding model (`Xenova/all-MiniLM-L6-v2`) runs locally — no API calls. It loads lazily on first use (~30MB download, cached after that).
@@ -354,6 +354,12 @@ git pull && npm run setup
 `setup.sh` builds the TypeScript, re-registers the MCP server, removes the old `~/.claude/CLAUDE.md` instructions block if present, and merges any new tool permissions into `settings.json`. Running it again on an existing install is safe and idempotent. The memory instructions now come from the server's MCP `instructions` field (`src/instructions.ts`), which Claude Code keeps in context even when the memory tools are deferred. Subagents no longer carry the CLAUDE.md block; whether they receive server instructions isn't documented. Installs from before this change keep the CLAUDE.md block until setup is re-run.
 
 **Database** — no action needed. New columns (`tags`, `load_with`, etc.) are added automatically via `ALTER TABLE` migrations on first startup. Existing memories are untouched.
+
+**After 4.0.1: keyword index and edit timestamps (schema version 3).** On first start the server adds a keyword index (`memories_fts`, `memory_fts_keys`), an `updated_at` column and the triggers that maintain them, in one transaction; a few hundred memories take well under a second. No re-embedding.
+
+- **A backup comes first.** Before changing anything, the first server to open an older file copies it to `memory.db.pre-schema-3`, rows still in the `-wal` file included, and reports the path in stderr and in its first `memory_project_summary`. An older backup there is replaced, so it always holds the file as it was just before the last upgrade attempt. If the copy fails, the server refuses to upgrade and exits with the reason.
+- **Rolling back to 4.0.1 is safe.** It opens and writes the migrated file, and the triggers keep the index and `updated_at` current for its writes too. To return to the file as it was before the upgrade instead, stop every Claude session, install 4.0.1, delete `memory.db-wal` and `memory.db-shm`, and move `memory.db.pre-schema-3` to `memory.db`; memories stored since the upgrade are lost. Skipping the sidecar delete replays the newer WAL over the backup or corrupts it.
+- **Anything else that writes `memory.db`** (a `sqlite3` shell, a script) needs SQLite with FTS5 and the trigram tokenizer's `remove_diacritics` option (3.45+); without them every write to `memories` fails. Reads are unaffected.
 
 **After 4.0.0: vectors move into `memory.db`.** Versions up to 4.0.0 kept vectors in `vector_index/index.json`, which every session cached and rewrote whole, so sessions lost each other's writes and some memories became unsearchable. On first start the new version re-embeds every memory that has no vector, in the background: a few hundred memories take about 4 s on Apple Silicon, model load included.
 
